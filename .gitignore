@@ -6,7 +6,11 @@ bin-release/
 
 # Other files and folders
 .settings/
-
+__pycache__
+processed/
+log/
+best_models/
+saved_checkpoints/
 # Executables
 *.swf
 *.air
