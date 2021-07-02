@@ -507,6 +507,7 @@ class CAWN(torch.nn.Module):
     start = time.time()
     subgraph_src = self.grab_subgraph(src_idx_l, cut_time_l, e_idx_l=e_idx_l, tgt_idx_l=tgt_idx_l)
     subgraph_tgt = self.grab_subgraph(tgt_idx_l, cut_time_l, e_idx_l=e_idx_l, tgt_idx_l=tgt_idx_l)
+    self.neighbors_builder.build_neigbhors(src_idx_l, tgt_idx_l, cut_time_l, e_idx_l)
     subgraph_bgd = self.grab_subgraph(bgd_idx_l, cut_time_l, e_idx_l=None)
     end = time.time()
     if self.verbosity > 1:
@@ -1072,7 +1073,7 @@ class FeatureEncoder(nn.Module):
     X = X.view(batch*n_walk, len_walk, feat_dim)
     if mask is not None:
       lengths = mask.view(batch*n_walk)
-      X = pack_padded_sequence(X, lengths, batch_first=True, enforce_sorted=False)
+      X = pack_padded_sequence(X, lengths.detach().cpu(), batch_first=True, enforce_sorted=False)
     encoded_features = self.lstm_encoder(X)[0]
     if mask is not None:
       encoded_features, lengths = pad_packed_sequence(encoded_features, batch_first=True)

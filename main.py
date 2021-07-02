@@ -6,6 +6,7 @@ from utils import *
 from train import *
 #import numba
 from module import CAWN
+from module2 import CAWN2
 from graph import NeighborFinder
 from neighbors import NeighborsBuilder
 import resource
@@ -119,11 +120,12 @@ resource.setrlimit(resource.RLIMIT_NOFILE, (200*args.bs, rlimit[1]))
 
 # model initialization
 device = torch.device('cuda:{}'.format(GPU))
-cawn = CAWN(n_feat, e_feat, agg=AGG,
-      num_layers=NUM_LAYER, use_time=USE_TIME, attn_agg_method=ATTN_AGG_METHOD, attn_mode=ATTN_MODE,
-      n_head=ATTN_NUM_HEADS, drop_out=DROP_OUT, pos_dim=POS_DIM, pos_enc=POS_ENC,
-      num_neighbors=NUM_NEIGHBORS, walk_n_head=WALK_N_HEAD, walk_mutual=WALK_MUTUAL, walk_linear_out=args.walk_linear_out,
-      cpu_cores=CPU_CORES, verbosity=VERBOSITY, get_checkpoint_path=get_checkpoint_path, neighbors_builder=NeighborsBuilder(max_idx + 1, bias=args.bias))
+# cawn = CAWN(n_feat, e_feat, agg=AGG,
+#       num_layers=NUM_LAYER, use_time=USE_TIME, attn_agg_method=ATTN_AGG_METHOD, attn_mode=ATTN_MODE,
+#       n_head=ATTN_NUM_HEADS, drop_out=DROP_OUT, pos_dim=POS_DIM, pos_enc=POS_ENC,
+#       num_neighbors=NUM_NEIGHBORS, walk_n_head=WALK_N_HEAD, walk_mutual=WALK_MUTUAL, walk_linear_out=args.walk_linear_out,
+#       cpu_cores=CPU_CORES, verbosity=VERBOSITY, get_checkpoint_path=get_checkpoint_path)
+cawn = CAWN2(max_idx+1, n_feat, e_feat, pos_dim=POS_DIM)
 cawn.to(device)
 optimizer = torch.optim.Adam(cawn.parameters(), lr=LEARNING_RATE)
 criterion = torch.nn.BCELoss()
