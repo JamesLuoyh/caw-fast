@@ -6,7 +6,7 @@ from utils import *
 from train import *
 #import numba
 from module import CAWN
-from module2 import CAWN2
+from module2 import CAWN2, NeighborhoodEncoder
 from graph import NeighborFinder
 from neighbors import NeighborsBuilder
 import resource
@@ -125,8 +125,17 @@ device = torch.device('cuda:{}'.format(GPU))
 #       n_head=ATTN_NUM_HEADS, drop_out=DROP_OUT, pos_dim=POS_DIM, pos_enc=POS_ENC,
 #       num_neighbors=NUM_NEIGHBORS, walk_n_head=WALK_N_HEAD, walk_mutual=WALK_MUTUAL, walk_linear_out=args.walk_linear_out,
 #       cpu_cores=CPU_CORES, verbosity=VERBOSITY, get_checkpoint_path=get_checkpoint_path)
-cawn = CAWN2(max_idx+1, n_feat, e_feat, pos_dim=POS_DIM)
+num_nodes = max_idx+1
+cawn = CAWN2(num_nodes, n_feat, e_feat, pos_dim=POS_DIM, n_head=ATTN_NUM_HEADS, drop_out=DROP_OUT, walk_linear_out=args.walk_linear_out)
 cawn.to(device)
+neighborhood_store = []
+feat_dim = n_feat.shape[1]
+e_feat_dim = e_feat.shape[1]
+time_dim = n_feat.shape[1]
+model_dim = feat_dim + e_feat_dim + time_dim
+neighborhood_store.append(torch.sparse_coo_tensor(size=(num_nodes, num_nodes, model_dim),requires_grad=False).to(device)) # sparse tensor (node_idx, neighbor_idx, encoded_features)
+neighborhood_store.append(torch.sparse_coo_tensor(size=(num_nodes, num_nodes, model_dim),requires_grad=False).to(device))
+cawn.update_neighborhood_encoder(neighborhood_store)
 optimizer = torch.optim.Adam(cawn.parameters(), lr=LEARNING_RATE)
 criterion = torch.nn.BCELoss()
 early_stopper = EarlyStopMonitor(tolerance=TOLERANCE)
