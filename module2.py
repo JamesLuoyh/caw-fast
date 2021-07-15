@@ -37,7 +37,7 @@ class MergeLayer(torch.nn.Module):
     return z, z_walk
 
 class CAWN2(torch.nn.Module):
-  def __init__(self, num_nodes, n_feat, e_feat, pos_dim=0, n_head=4, drop_out=0.1, walk_linear_out=False):
+  def __init__(self, num_nodes, n_feat, e_feat, pos_dim=0, n_head=4, drop_out=0.1, walk_linear_out=False, get_checkpoint_path=None):
     super(CAWN2, self).__init__()
     self.logger = logging.getLogger(__name__)
     self.drop_out = drop_out
@@ -61,7 +61,7 @@ class CAWN2(torch.nn.Module):
     # final projection layer
     self.walk_linear_out = walk_linear_out
     self.affinity_score = MergeLayer(self.feat_model_dim, self.feat_model_dim, self.feat_model_dim, 1, non_linear=not self.walk_linear_out) #torch.nn.Bilinear(self.feat_dim, self.feat_dim, 1, bias=True)
-
+    self.get_checkpoint_path = get_checkpoint_path
 
 
   def update_neighborhood_encoder(self, neighborhood_store):
@@ -90,6 +90,7 @@ class CAWN2(torch.nn.Module):
     src_features = self.get_encoded_features(src_idx_l, src_node_features, time_features, device)
     tgt_features = self.get_encoded_features(tgt_idx_l, tgt_node_features, time_features, device)
     bad_features = self.get_encoded_features(bad_idx_l, bad_node_features, time_features, device)
+
     pos_score = self.forward(src_idx_l, tgt_idx_l, cut_time_l, e_idx_l, (src_features, tgt_features), (src_ngh_features, tgt_ngh_features), device)
     neg_score1 = self.forward(src_idx_l, bad_idx_l, cut_time_l, e_idx_l, (src_features, bad_features), (src_ngh_features, bad_ngh_features), device)
 
@@ -98,14 +99,14 @@ class CAWN2(torch.nn.Module):
   def update_neighborhood_state(self, src_idx_l, tgt_idx_l, src_node_features, tgt_node_features, time_features, edge_features, device):
     hidden_state, cell_state, hidden_embeddings, time_features, edge_features = self.ngh_encoder.retrieve_hidden_state(
       src_idx_l, tgt_idx_l, src_node_features, tgt_node_features, time_features, edge_features, device)
-    print(hidden_state, cell_state)
     hidden_state, cell_state = self.feature_encoder(hidden_embeddings, time_features, edge_features, hidden_state, cell_state)
-    self.ngh_encoder.update_hidden_state(src_idx_l, tgt_idx_l, hidden_state, cell_state, device)
+    self.ngh_encoder.update_hidden_state(src_idx_l, tgt_idx_l, hidden_state.detach(), cell_state.detach(), device)
 
   def forward(self, src_idx_l, tgt_idx_l, cut_time_l, e_idx_l, origin_features, ngh_features, device):
     start = time.time()
     src_ngh_features, tgt_ngh_features = ngh_features
     src_features, tgt_features = origin_features
+
     src_pos, src_ngh_zeros = self.get_positions(src_idx_l, src_ngh_features, device)
     tgt_pos, tgt_ngh_zeros = self.get_positions(tgt_idx_l, tgt_ngh_features, device)
     src_idx_th = torch.from_numpy(src_idx_l).long().to(device)
@@ -144,8 +145,6 @@ class CAWN2(torch.nn.Module):
 
     # src_embedding
     # tgt_embedding
-    print("*"*100)
-    print(src_embed[0].squeeze(1).shape)
     score, score_walk = self.affinity_score(src_embed[0].squeeze(1), tgt_embed[0].squeeze(1))
     score.squeeze_(dim=-1)
     end = time.time()
@@ -161,7 +160,7 @@ class CAWN2(torch.nn.Module):
     cell_state = torch.diagonal(cell_state.to_dense(),0).T
     edge_features = torch.zeros((len(src_idx_l), self.e_feat_dim)).float().to(device)
     hidden_state, cell_state = self.feature_encoder(src_node_features, time_features, edge_features, hidden_state, cell_state) # LSTMCell
-    return hidden_state
+    return hidden_state.detach()
 
 
   def get_pos_encoding_for_origin(self, src_idx, src_relative_id, tgt_relative_id):
@@ -192,7 +191,7 @@ class CAWN2(torch.nn.Module):
   def get_positions(self, src_idx_l, src_ngh_features, device):
     unqiue_src_l = np.unique(src_idx_l)
     src_pos = torch.sparse_coo_tensor([unqiue_src_l, unqiue_src_l], 2 * torch.ones(len(unqiue_src_l), 1).long(), (self.num_nodes, self.num_nodes, 1)).to(device).coalesce()
-    indices = np.array([src_idx_l[src_ngh_features.indices().cpu()[0]], np.array(src_ngh_features.indices().cpu()[1])])
+    indices = np.array([np.take(src_idx_l,src_ngh_features.indices().cpu()[0]), np.array(src_ngh_features.indices().cpu()[1])])
     indices = np.unique(indices, axis=1)
     src_pos += torch.sparse_coo_tensor(indices, torch.ones(len(indices[0]), 1).long().to(device), (self.num_nodes, self.num_nodes, 1))
     src_pos = src_pos.coalesce()
@@ -451,7 +450,8 @@ class FeatureEncoder(torch.nn.Module):
 
   def forward(self, hidden_embeddings, time_features, edge_features, hidden_state, cell_state):
     agg_features = torch.cat([hidden_embeddings, time_features, edge_features], dim=-1)
-    return self.lstm_cell(agg_features, (hidden_state, cell_state))
+    encoded_features = self.lstm_cell(agg_features, (hidden_state, cell_state))
+    return self.dropout(encoded_features[0]), self.dropout(encoded_features[1])
 
 class TimeEncode(torch.nn.Module):
   def __init__(self, expand_dim, factor=5):

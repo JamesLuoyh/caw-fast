@@ -82,8 +82,8 @@ def train_val(train_val_data, model, mode, bs, epochs, criterion, optimizer, ear
     if epoch == 0:
       # save things for data anaysis
       checkpoint_dir = '/'.join(model.get_checkpoint_path(0).split('/')[:-1])
-      model.ngh_finder.save_ngh_stats(checkpoint_dir)  # for data analysis
-      model.save_common_node_percentages(checkpoint_dir)
+      # model.ngh_finder.save_ngh_stats(checkpoint_dir)  # for data analysis
+      # model.save_common_node_percentages(checkpoint_dir)
 
     # early stop check and checkpoint saving
     if early_stopper.early_stop_check(val_ap):

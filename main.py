@@ -126,7 +126,7 @@ device = torch.device('cuda:{}'.format(GPU))
 #       num_neighbors=NUM_NEIGHBORS, walk_n_head=WALK_N_HEAD, walk_mutual=WALK_MUTUAL, walk_linear_out=args.walk_linear_out,
 #       cpu_cores=CPU_CORES, verbosity=VERBOSITY, get_checkpoint_path=get_checkpoint_path)
 num_nodes = max_idx+1
-cawn = CAWN2(num_nodes, n_feat, e_feat, pos_dim=POS_DIM, n_head=ATTN_NUM_HEADS, drop_out=DROP_OUT, walk_linear_out=args.walk_linear_out)
+cawn = CAWN2(num_nodes, n_feat, e_feat, pos_dim=POS_DIM, n_head=ATTN_NUM_HEADS, drop_out=DROP_OUT, walk_linear_out=args.walk_linear_out, get_checkpoint_path=get_checkpoint_path)
 cawn.to(device)
 neighborhood_store = []
 feat_dim = n_feat.shape[1]
@@ -147,7 +147,8 @@ early_stopper = EarlyStopMonitor(tolerance=TOLERANCE)
 train_val(train_val_data, cawn, args.mode, BATCH_SIZE, NUM_EPOCH, criterion, optimizer, early_stopper, ngh_finders, rand_samplers, logger)
 
 # final testing
-cawn.update_ngh_finder(full_ngh_finder)  # remember that testing phase should always use the full neighbor finder
+# cawn.update_ngh_finder(full_ngh_finder)  # remember that testing phase should always use the full neighbor finder
+print("_*"*50)
 test_acc, test_ap, test_f1, test_auc = eval_one_epoch('test for {} nodes'.format(args.mode), cawn, test_rand_sampler, test_src_l, test_dst_l, test_ts_l, test_label_l, test_e_idx_l)
 logger.info('Test statistics: {} all nodes -- acc: {}, auc: {}, ap: {}'.format(args.mode, test_acc, test_auc, test_ap))
 test_new_new_acc, test_new_new_ap, test_new_new_auc, test_new_old_acc, test_new_old_ap, test_new_old_auc = [-1]*6
