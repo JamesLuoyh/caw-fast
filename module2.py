@@ -64,6 +64,7 @@ class CAWN2(torch.nn.Module):
     # self.affinity_score = MergeLayer(self.feat_model_dim, self.feat_model_dim, self.feat_model_dim, 1, non_linear=not self.walk_linear_out) #torch.nn.Bilinear(self.feat_dim, self.feat_dim, 1, bias=True)
     self.affinity_score = MergeLayer(self.feat_dim, self.feat_dim, self.feat_dim, 1, non_linear=not self.walk_linear_out) #torch.nn.Bilinear(self.feat_dim, self.feat_dim, 1, bias=True)
     self.get_checkpoint_path = get_checkpoint_path
+    self.src_idx_l_prev = self.tgt_idx_l_prev = self.cut_time_l_prev = self.e_idx_l_prev = None
 
 
   def update_neighborhood_encoder(self, neighborhood_store):
@@ -82,14 +83,16 @@ class CAWN2(torch.nn.Module):
     bad_idx_th = torch.from_numpy(bad_idx_l).long().to(device)
     bad_node_features = self.node_raw_embed(bad_idx_th)  # shape [batch, node_dim]
     # src_features_combined = 
-    # self.update_neighborhood_state(src_idx_l, tgt_idx_l, src_node_features, tgt_node_features, time_features, edge_features, device)
+    self.update_prev_raw_data(src_idx_l, tgt_idx_l, cut_time_l, e_idx_l)
+    if self.src_idx_l_prev is not None:
+      self.update_neighborhood_state(device)
     src_ngh_features = self.ngh_encoder.get(src_idx_l, device)
     tgt_ngh_features = self.ngh_encoder.get(tgt_idx_l, device)
     bad_ngh_features = self.ngh_encoder.get(bad_idx_l, device)
+    
     end = time.time()
     # self.logger.info('grab subgraph for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
     start = time.time()
-    self.update_neighborhood_state(src_idx_l, tgt_idx_l, src_node_features, tgt_node_features, time_features, edge_features, device)
     end = time.time()
     # self.logger.info('update subgraph for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
     start = time.time()
@@ -103,9 +106,19 @@ class CAWN2(torch.nn.Module):
 
     return pos_score.sigmoid(), neg_score1.sigmoid()
   
-  def update_neighborhood_state(self, src_idx_l, tgt_idx_l, src_node_features, tgt_node_features, time_features, edge_features, device):
-    src_idx_l_concat = np.concatenate((src_idx_l, tgt_idx_l), -1)
-    tgt_idx_l_concat = np.concatenate((tgt_idx_l, src_idx_l), -1)
+  def update_prev_raw_data(self, src_idx_l, tgt_idx_l, cut_time_l, e_idx_l):
+    self.src_idx_l_prev, self.tgt_idx_l_prev, self.cut_time_l_prev, self.e_idx_l_prev = src_idx_l, tgt_idx_l, cut_time_l, e_idx_l
+
+  def update_neighborhood_state(self, device):
+    time_features = self.time_encoder(torch.from_numpy(self.cut_time_l_prev).float().to(device))
+    e_idx_th = torch.from_numpy(self.e_idx_l_prev).long().to(device)
+    edge_features = self.edge_raw_embed(e_idx_th)  # shape [batch, node_dim]
+    src_idx_l_concat = np.concatenate((self.src_idx_l_prev, self.tgt_idx_l_prev), -1)
+    tgt_idx_l_concat = np.concatenate((self.tgt_idx_l_prev, self.src_idx_l_prev), -1)
+    src_idx_th = torch.from_numpy(self.src_idx_l_prev).long().to(device)
+    src_node_features = self.node_raw_embed(src_idx_th)  # shape [batch, node_dim]
+    tgt_idx_th = torch.from_numpy(self.tgt_idx_l_prev).long().to(device)
+    tgt_node_features = self.node_raw_embed(tgt_idx_th)  # shape [batch, node_dim]
     hidden_state, hidden_embeddings, time_features, edge_features = self.ngh_encoder.retrieve_hidden_state(
       src_idx_l_concat, tgt_idx_l_concat, src_node_features, tgt_node_features, time_features, edge_features, device)
     hidden_state, cell_state = self.feature_encoder(hidden_embeddings, time_features, edge_features, hidden_state)
@@ -191,13 +204,15 @@ class CAWN2(torch.nn.Module):
     return score 
 
   def get_encoded_features(self, src_idx_l, src_node_features, time_features, device):
-    hidden_init = self.feature_encoder.init_hidden_states(src_idx_l, src_idx_l, device)
-    src_idx_th = torch.from_numpy(src_idx_l).long().to(device)
-    hidden_state = torch.index_select(torch.index_select(hidden_init.coalesce(), 0, src_idx_th), 1, src_idx_th)
-    hidden_state = torch.diagonal(hidden_state.to_dense(),0).permute(-1, 0, 1)
-    # cell_state = torch.index_select(torch.index_select(cell_init.coalesce(), 0, src_idx_th), 1, src_idx_th)
-    # cell_state = torch.diagonal(cell_state.to_dense(),0).T
+    # hidden_init = self.feature_encoder.init_hidden_states(src_idx_l, src_idx_l, device)
+    # src_idx_th = torch.from_numpy(src_idx_l).long().to(device)
+    # hidden_state = torch.index_select(torch.index_select(hidden_init.coalesce(), 0, src_idx_th), 1, src_idx_th)
+    # hidden_state = torch.diagonal(hidden_state.to_dense(),0).permute(-1, 0, 1)
+    # # cell_state = torch.index_select(torch.index_select(cell_init.coalesce(), 0, src_idx_th), 1, src_idx_th)
+    # # cell_state = torch.diagonal(cell_state.to_dense(),0).T
     edge_features = torch.zeros((len(src_idx_l), self.e_feat_dim)).float().to(device)
+    # print(hidden_state.shape)
+    hidden_state = torch.nn.init.xavier_normal_(torch.zeros(len(src_idx_l), 2, self.feat_model_dim)).to(device)
     hidden_state, cell_state = self.feature_encoder(src_node_features, time_features, edge_features, hidden_state, use_dropout=False) # LSTMCell
     return hidden_state.detach()
 
@@ -429,7 +444,7 @@ class NeighborhoodEncoder:
     src_idx_th_concat = torch.from_numpy(src_idx_l_concat).long().to(device)
     tgt_idx_th_concat = torch.from_numpy(tgt_idx_l_concat).long().to(device)
     # TODO: tbd on how to aggregate src node and tgt node features
-    hidden_embeddings = torch.cat((src_node_features,tgt_node_features), 0)
+    hidden_embeddings = torch.cat((tgt_node_features, src_node_features), 0)
     # print(hidden_embeddings.shape)
     
     edge_features = torch.cat((edge_features,edge_features), 0)
