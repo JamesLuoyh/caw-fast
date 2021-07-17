@@ -133,9 +133,9 @@ feat_dim = n_feat.shape[1]
 e_feat_dim = e_feat.shape[1]
 time_dim = n_feat.shape[1]
 model_dim = feat_dim + e_feat_dim + time_dim
-neighborhood_store.append(torch.sparse_coo_tensor(size=(num_nodes, num_nodes, model_dim),requires_grad=False).to(device)) # sparse tensor (node_idx, neighbor_idx, encoded_features)
-neighborhood_store.append(torch.sparse_coo_tensor(size=(num_nodes, num_nodes, model_dim),requires_grad=False).to(device))
-# neighborhood_store = torch.sparse_coo_tensor([[0], [0]], torch.zeros(1, 2, model_dim), (num_nodes, num_nodes, 2, model_dim)).to(device)
+# neighborhood_store.append(torch.sparse_coo_tensor(size=(num_nodes, num_nodes, model_dim),requires_grad=False).to(device)) # sparse tensor (node_idx, neighbor_idx, encoded_features)
+# neighborhood_store.append(torch.sparse_coo_tensor(size=(num_nodes, num_nodes, model_dim),requires_grad=False).to(device))
+neighborhood_store = torch.sparse_coo_tensor([[0], [0]], torch.zeros(1, 2, model_dim), (num_nodes, num_nodes, 2, model_dim)).to(device)
 cawn.update_neighborhood_encoder(neighborhood_store)
 optimizer = torch.optim.Adam(cawn.parameters(), lr=LEARNING_RATE)
 criterion = torch.nn.BCELoss()

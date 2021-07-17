@@ -86,23 +86,33 @@ class CAWN2(torch.nn.Module):
     src_ngh_features = self.ngh_encoder.get(src_idx_l, device)
     tgt_ngh_features = self.ngh_encoder.get(tgt_idx_l, device)
     bad_ngh_features = self.ngh_encoder.get(bad_idx_l, device)
+    end = time.time()
+    # self.logger.info('grab subgraph for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
+    start = time.time()
     self.update_neighborhood_state(src_idx_l, tgt_idx_l, src_node_features, tgt_node_features, time_features, edge_features, device)
     end = time.time()
-    self.logger.info('grab subgraph for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
+    # self.logger.info('update subgraph for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
+    start = time.time()
     src_features = self.get_encoded_features(src_idx_l, src_node_features, time_features, device)
     tgt_features = self.get_encoded_features(tgt_idx_l, tgt_node_features, time_features, device)
     bad_features = self.get_encoded_features(bad_idx_l, bad_node_features, time_features, device)
-
+    end = time.time()
+    # self.logger.info('src feat for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
     pos_score = self.forward(src_idx_l, tgt_idx_l, cut_time_l, e_idx_l, (src_features, tgt_features), (src_ngh_features, tgt_ngh_features), device)
     neg_score1 = self.forward(src_idx_l, bad_idx_l, cut_time_l, e_idx_l, (src_features, bad_features), (src_ngh_features, bad_ngh_features), device)
 
     return pos_score.sigmoid(), neg_score1.sigmoid()
-
+  
   def update_neighborhood_state(self, src_idx_l, tgt_idx_l, src_node_features, tgt_node_features, time_features, edge_features, device):
-    hidden_state, cell_state, hidden_embeddings, time_features, edge_features = self.ngh_encoder.retrieve_hidden_state(
-      src_idx_l, tgt_idx_l, src_node_features, tgt_node_features, time_features, edge_features, device)
-    hidden_state, cell_state = self.feature_encoder(hidden_embeddings, time_features, edge_features, hidden_state, cell_state)
-    self.ngh_encoder.update_hidden_state(src_idx_l, tgt_idx_l, hidden_state.detach(), cell_state.detach(), device)
+    src_idx_l_concat = np.concatenate((src_idx_l, tgt_idx_l), -1)
+    tgt_idx_l_concat = np.concatenate((tgt_idx_l, src_idx_l), -1)
+    hidden_state, hidden_embeddings, time_features, edge_features = self.ngh_encoder.retrieve_hidden_state(
+      src_idx_l_concat, tgt_idx_l_concat, src_node_features, tgt_node_features, time_features, edge_features, device)
+    hidden_state, cell_state = self.feature_encoder(hidden_embeddings, time_features, edge_features, hidden_state)
+    hidden_state = hidden_state.unsqueeze(-2)
+    cell_state = cell_state.unsqueeze(-2)
+    hidden_state = torch.cat((hidden_state, cell_state), -2)
+    self.ngh_encoder.update_hidden_state(tgt_idx_l_concat, tgt_idx_l_concat, hidden_state.detach(), device)
 
   def relative_node_features(self, src_idx_l, ngh_features):
     start = time.time()
@@ -110,8 +120,10 @@ class CAWN2(torch.nn.Module):
     src_ngh_idx = torch.unique(src_ngh_features.indices()[1])
     src_ngh_features_dense = torch.index_select(src_ngh_features, 1, src_ngh_idx)
     src_ngh_features_dense = src_ngh_features_dense.to_dense()
+    src_ngh_features_dense = src_ngh_features_dense[:,:,0]
     tgt_ngh_features_dense = torch.index_select(tgt_ngh_features, 1, src_ngh_idx)
     tgt_ngh_features_dense = tgt_ngh_features_dense.to_dense()
+    tgt_ngh_features_dense = tgt_ngh_features_dense[:,:,0]
     # print("*"*50)
     # print(src_ngh_features_dense.shape)
     # print(tgt_ngh_features_dense.shape)
@@ -128,7 +140,6 @@ class CAWN2(torch.nn.Module):
     src_relative_node_feat, src_mask = self.relative_node_features(src_idx_l, ngh_features)
     tgt_relative_node_feat, tgt_mask = self.relative_node_features(tgt_idx_l, (tgt_ngh_features, src_ngh_features))
     src_features, tgt_features = origin_features
-
     # src_ngh_features, tgt_ngh_features = ngh_features
     # 
     # src_pos, src_ngh_zeros = self.get_positions(src_idx_l, src_ngh_features, device)
@@ -180,14 +191,14 @@ class CAWN2(torch.nn.Module):
     return score 
 
   def get_encoded_features(self, src_idx_l, src_node_features, time_features, device):
-    hidden_init, cell_init = self.feature_encoder.init_hidden_states(src_idx_l, src_idx_l, device)
+    hidden_init = self.feature_encoder.init_hidden_states(src_idx_l, src_idx_l, device)
     src_idx_th = torch.from_numpy(src_idx_l).long().to(device)
     hidden_state = torch.index_select(torch.index_select(hidden_init.coalesce(), 0, src_idx_th), 1, src_idx_th)
-    hidden_state = torch.diagonal(hidden_state.to_dense(),0).T
-    cell_state = torch.index_select(torch.index_select(cell_init.coalesce(), 0, src_idx_th), 1, src_idx_th)
-    cell_state = torch.diagonal(cell_state.to_dense(),0).T
+    hidden_state = torch.diagonal(hidden_state.to_dense(),0).permute(-1, 0, 1)
+    # cell_state = torch.index_select(torch.index_select(cell_init.coalesce(), 0, src_idx_th), 1, src_idx_th)
+    # cell_state = torch.diagonal(cell_state.to_dense(),0).T
     edge_features = torch.zeros((len(src_idx_l), self.e_feat_dim)).float().to(device)
-    hidden_state, cell_state = self.feature_encoder(src_node_features, time_features, edge_features, hidden_state, cell_state, use_dropout=False) # LSTMCell
+    hidden_state, cell_state = self.feature_encoder(src_node_features, time_features, edge_features, hidden_state, use_dropout=False) # LSTMCell
     return hidden_state.detach()
 
 
@@ -383,7 +394,8 @@ class NeighborhoodEncoder:
   def update_neighborhood_store(self, neighborhood_store):
     self.neighborhood_store = neighborhood_store
   
-  def retrieve_hidden_state(self, src_idx_l, tgt_idx_l, src_node_features, tgt_node_features, time_features, edge_features, device=None):
+  def retrieve_hidden_state(self, src_idx_l_concat, tgt_idx_l_concat,
+    src_node_features, tgt_node_features, time_features, edge_features, device=None):
     # 1. initialize new neighbors in neighborhood_store
 
     # mark null node to far away: no such entry in sparse matrix so should be fine
@@ -391,14 +403,18 @@ class NeighborhoodEncoder:
 
     # if not exist, add new entry
     start = time.time()
-    hidden_src, cell_src = self.feature_encoder.init_hidden_states(src_idx_l, tgt_idx_l, device)
-    self.neighborhood_store[0] += hidden_src
-    self.neighborhood_store[1] += cell_src
-    hidden_tgt, cell_tgt = self.feature_encoder.init_hidden_states(tgt_idx_l, src_idx_l, device)
-    self.neighborhood_store[0] += hidden_tgt
-    self.neighborhood_store[1] += cell_tgt
-    self.neighborhood_store[0] = self.neighborhood_store[0].coalesce()
-    self.neighborhood_store[1] = self.neighborhood_store[1].coalesce()
+    hidden_src = self.feature_encoder.init_hidden_states(src_idx_l_concat, tgt_idx_l_concat, device)
+    # print(hidden_src.shape)
+    self.neighborhood_store += hidden_src
+    self.neighborhood_store = self.neighborhood_store.coalesce()
+    # hidden_src, cell_src = self.feature_encoder.init_hidden_states(src_idx_l, tgt_idx_l, device)
+    # self.neighborhood_store[0] += hidden_src
+    # self.neighborhood_store[1] += cell_src
+    # hidden_tgt, cell_tgt = self.feature_encoder.init_hidden_states(tgt_idx_l, src_idx_l, device)
+    # self.neighborhood_store[0] += hidden_tgt
+    # self.neighborhood_store[1] += cell_tgt
+    # self.neighborhood_store[0] = self.neighborhood_store[0].coalesce()
+    # self.neighborhood_store[1] = self.neighborhood_store[1].coalesce()
     end = time.time()
     # self.logger.info('init, time eclipsed: {} seconds'.format(str(end-start)))
     # print(self.neighborhood_store)
@@ -408,8 +424,10 @@ class NeighborhoodEncoder:
     
     time_features = torch.cat((time_features,time_features), 0)
     # print(time_features)
-    src_idx_th = torch.from_numpy(src_idx_l).long().to(device)
-    tgt_idx_th = torch.from_numpy(tgt_idx_l).long().to(device)
+    # src_idx_th = torch.from_numpy(src_idx_l).long().to(device)
+    # tgt_idx_th = torch.from_numpy(tgt_idx_l).long().to(device)
+    src_idx_th_concat = torch.from_numpy(src_idx_l_concat).long().to(device)
+    tgt_idx_th_concat = torch.from_numpy(tgt_idx_l_concat).long().to(device)
     # TODO: tbd on how to aggregate src node and tgt node features
     hidden_embeddings = torch.cat((src_node_features,tgt_node_features), 0)
     # print(hidden_embeddings.shape)
@@ -426,38 +444,47 @@ class NeighborhoodEncoder:
     # print(self.neighborhood_store[0].coalesce())
     # print(torch.index_select(self.neighborhood_store[0].coalesce(), 0, src_idx_th))
     # print(torch.index_select(torch.index_select(self.neighborhood_store[0].coalesce(), 0, src_idx_th), 1, tgt_idx_th))
+    # start = time.time()
+    # hidden_state = torch.index_select(torch.index_select(self.neighborhood_store[0], 0, src_idx_th).coalesce(), 1, tgt_idx_th).coalesce()
+    # # print(hidden_state)
+    # end = time.time()
+    # hidden_state = torch.diagonal(hidden_state.to_dense(),0).T
+    # end = time.time()
+    # cell_state = torch.index_select(torch.index_select(self.neighborhood_store[1], 0, src_idx_th), 1, tgt_idx_th)
+    # cell_state = torch.diagonal(cell_state.to_dense(),0).T
+    # hidden_state_tgt = torch.index_select(torch.index_select(self.neighborhood_store[0], 0, tgt_idx_th), 1, src_idx_th)
+    # hidden_state_tgt = torch.diagonal(hidden_state_tgt.to_dense(),0).T
+    # cell_state_tgt = torch.index_select(torch.index_select(self.neighborhood_store[1], 0, tgt_idx_th), 1, src_idx_th)
+    # cell_state_tgt = torch.diagonal(cell_state_tgt.to_dense(),0).T
+    # hidden_state = torch.cat((hidden_state, hidden_state_tgt), 0)
+    # cell_state = torch.cat((cell_state, cell_state_tgt), 0)
+    # end = time.time()
+
     start = time.time()
-    hidden_state = torch.index_select(torch.index_select(self.neighborhood_store[0], 0, src_idx_th).coalesce(), 1, tgt_idx_th).coalesce()
-    # print(hidden_state)
+    hidden_state = torch.index_select(torch.index_select(self.neighborhood_store, 0, src_idx_th_concat), 1, tgt_idx_th_concat).coalesce()
+    hidden_state = torch.diagonal(hidden_state.to_dense(),0).permute(-1, 0, 1)
     end = time.time()
-    hidden_state = torch.diagonal(hidden_state.to_dense(),0).T
-    end = time.time()
-    cell_state = torch.index_select(torch.index_select(self.neighborhood_store[1], 0, src_idx_th), 1, tgt_idx_th)
-    cell_state = torch.diagonal(cell_state.to_dense(),0).T
-    hidden_state_tgt = torch.index_select(torch.index_select(self.neighborhood_store[0], 0, tgt_idx_th), 1, src_idx_th)
-    hidden_state_tgt = torch.diagonal(hidden_state_tgt.to_dense(),0).T
-    cell_state_tgt = torch.index_select(torch.index_select(self.neighborhood_store[1], 0, tgt_idx_th), 1, src_idx_th)
-    cell_state_tgt = torch.diagonal(cell_state_tgt.to_dense(),0).T
-    hidden_state = torch.cat((hidden_state, hidden_state_tgt), 0)
-    cell_state = torch.cat((cell_state, cell_state_tgt), 0)
-    end = time.time()
+    # self.logger.info('hidden_state retrieve, time eclipsed: {} seconds'.format(str(end-start)))
     # self.logger.info('retrieve hidden states, time eclipsed: {} seconds'.format(str(end-start)))
-    return hidden_state, cell_state, hidden_embeddings, time_features, edge_features
+    return hidden_state, hidden_embeddings, time_features, edge_features
     # print(hidden_state.T.shape)
     # hidden_state, cell_state = self.feature_encoder(hidden_embeddings, time_features, edge_features, hidden_state, cell_state) # LSTMCell
-  
-  def update_hidden_state(self, src_idx_l, tgt_idx_l, hidden_state, cell_state, device=None):
+
+  def update_hidden_state(self, src_idx_l_concat, tgt_idx_l_concat, hidden_state, device=None):
     # 4. feed back into neighborhodd_store
     start = time.time()
-    self.neighborhood_store[0] *= torch.sparse_coo_tensor([src_idx_l, tgt_idx_l], torch.zeros(len(src_idx_l), self.model_dim), (self.num_nodes, self.num_nodes, self.model_dim)).to(device)
-    self.neighborhood_store[1] *= torch.sparse_coo_tensor([src_idx_l, tgt_idx_l], torch.zeros(len(src_idx_l), self.model_dim), (self.num_nodes, self.num_nodes, self.model_dim)).to(device)
-    self.neighborhood_store[0] *= torch.sparse_coo_tensor([tgt_idx_l, src_idx_l], torch.zeros(len(src_idx_l), self.model_dim), (self.num_nodes, self.num_nodes, self.model_dim)).to(device)
-    self.neighborhood_store[1] *= torch.sparse_coo_tensor([tgt_idx_l, src_idx_l], torch.zeros(len(src_idx_l), self.model_dim), (self.num_nodes, self.num_nodes, self.model_dim)).to(device)
+
+    self.neighborhood_store *= torch.sparse_coo_tensor([src_idx_l_concat, tgt_idx_l_concat], torch.zeros(len(src_idx_l_concat), 2, self.model_dim), (self.num_nodes, self.num_nodes, 2, self.model_dim)).to(device)
+    self.neighborhood_store += torch.sparse_coo_tensor([src_idx_l_concat, tgt_idx_l_concat], hidden_state, (self.num_nodes, self.num_nodes, 2, self.model_dim))
+    # self.neighborhood_store[0] *= torch.sparse_coo_tensor([src_idx_l, tgt_idx_l], torch.zeros(len(src_idx_l), self.model_dim), (self.num_nodes, self.num_nodes, self.model_dim)).to(device)
+    # self.neighborhood_store[1] *= torch.sparse_coo_tensor([src_idx_l, tgt_idx_l], torch.zeros(len(src_idx_l), self.model_dim), (self.num_nodes, self.num_nodes, self.model_dim)).to(device)
+    # self.neighborhood_store[0] *= torch.sparse_coo_tensor([tgt_idx_l, src_idx_l], torch.zeros(len(src_idx_l), self.model_dim), (self.num_nodes, self.num_nodes, self.model_dim)).to(device)
+    # self.neighborhood_store[1] *= torch.sparse_coo_tensor([tgt_idx_l, src_idx_l], torch.zeros(len(src_idx_l), self.model_dim), (self.num_nodes, self.num_nodes, self.model_dim)).to(device)
     
-    self.neighborhood_store[0] += torch.sparse_coo_tensor([src_idx_l, tgt_idx_l], hidden_state[:len(src_idx_l)], (self.num_nodes, self.num_nodes, self.model_dim))
-    self.neighborhood_store[1] += torch.sparse_coo_tensor([src_idx_l, tgt_idx_l], cell_state[:len(src_idx_l)], (self.num_nodes, self.num_nodes, self.model_dim))
-    self.neighborhood_store[0] += torch.sparse_coo_tensor([tgt_idx_l, src_idx_l], hidden_state[len(src_idx_l):], (self.num_nodes, self.num_nodes, self.model_dim))
-    self.neighborhood_store[1] += torch.sparse_coo_tensor([tgt_idx_l, src_idx_l], cell_state[len(src_idx_l):], (self.num_nodes, self.num_nodes, self.model_dim))
+    # self.neighborhood_store[0] += torch.sparse_coo_tensor([src_idx_l, tgt_idx_l], hidden_state[:len(src_idx_l)], (self.num_nodes, self.num_nodes, self.model_dim))
+    # self.neighborhood_store[1] += torch.sparse_coo_tensor([src_idx_l, tgt_idx_l], cell_state[:len(src_idx_l)], (self.num_nodes, self.num_nodes, self.model_dim))
+    # self.neighborhood_store[0] += torch.sparse_coo_tensor([tgt_idx_l, src_idx_l], hidden_state[len(src_idx_l):], (self.num_nodes, self.num_nodes, self.model_dim))
+    # self.neighborhood_store[1] += torch.sparse_coo_tensor([tgt_idx_l, src_idx_l], cell_state[len(src_idx_l):], (self.num_nodes, self.num_nodes, self.model_dim))
     end = time.time()
     # self.logger.info('put back, time eclipsed: {} seconds'.format(str(end-start)))
   
@@ -466,7 +493,7 @@ class NeighborhoodEncoder:
     # return nodes in neighborhood store
     start = time.time()
     src_idx_th = torch.from_numpy(src_idx_l).long().to(device)
-    encoded_ngh = torch.index_select(self.neighborhood_store[0], 0, src_idx_th).coalesce()
+    encoded_ngh = torch.index_select(self.neighborhood_store, 0, src_idx_th).coalesce()
     end = time.time()
     # self.logger.info('get, time eclipsed: {} seconds'.format(str(end-start)))
     return encoded_ngh
@@ -480,16 +507,16 @@ class FeatureEncoder(torch.nn.Module):
     self.num_nodes = num_nodes
 
   def init_hidden_states(self, src_idx_l, tgt_idx_l, device):
-    hidden = torch.sparse_coo_tensor([src_idx_l, tgt_idx_l], torch.nn.init.xavier_normal_(torch.zeros(len(src_idx_l), self.hidden_dim)), (self.num_nodes, self.num_nodes, self.hidden_dim)).to(device)
-    cell = torch.sparse_coo_tensor([src_idx_l, tgt_idx_l], torch.nn.init.xavier_normal_(torch.zeros(len(src_idx_l), self.hidden_dim)), (self.num_nodes, self.num_nodes, self.hidden_dim)).to(device)
-    return hidden, cell
+    hidden = torch.sparse_coo_tensor([src_idx_l, tgt_idx_l], torch.nn.init.xavier_normal_(torch.zeros(len(src_idx_l), 2, self.hidden_dim)), (self.num_nodes, self.num_nodes, 2, self.hidden_dim)).to(device)
+    return hidden
 
-  def forward(self, hidden_embeddings, time_features, edge_features, hidden_state, cell_state, use_dropout=True):
+  def forward(self, hidden_embeddings, time_features, edge_features, hidden_state, use_dropout=True):
     agg_features = torch.cat([hidden_embeddings, time_features, edge_features], dim=-1)
-    encoded_features = self.lstm_cell(agg_features, (hidden_state, cell_state))
+    encoded_features = self.lstm_cell(agg_features, (hidden_state[:,0], hidden_state[:,1]))
     if use_dropout:
       encoded_features = self.dropout(encoded_features[0]), self.dropout(encoded_features[1])
-    return encoded_features
+
+    return encoded_features[0], encoded_features[1]
 
 class TimeEncode(torch.nn.Module):
   def __init__(self, expand_dim, factor=5):
