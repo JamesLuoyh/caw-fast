@@ -30,7 +30,7 @@ def eval_one_epoch(hint, tgan, sampler, src, dst, ts, label, val_e_idx_l=None):
       size = len(src_l_cut)
       src_l_fake, dst_l_fake = sampler.sample(size)
 
-      pos_prob, neg_prob = tgan.contrast(src_l_cut, dst_l_cut, dst_l_fake, ts_l_cut, e_l_cut)
+      pos_prob, neg_prob = tgan.contrast(src_l_cut, dst_l_cut, dst_l_fake, ts_l_cut, e_l_cut, test=True)
 
       pred_score = np.concatenate([(pos_prob).cpu().numpy(), (neg_prob).cpu().numpy()])
       pred_label = pred_score > 0.5

@@ -11,7 +11,7 @@ logging.getLogger('matplotlib.font_manager').disabled = True
 logging.getLogger('matplotlib.ticker').disabled = True
 
 
-def train_val(train_val_data, model, mode, bs, epochs, criterion, optimizer, early_stopper, ngh_finders, rand_samplers, logger):
+def train_val(train_val_data, model, mode, bs, epochs, criterion, optimizer, early_stopper, ngh_finders, rand_samplers, logger, model_dim, num_nodes):
   # unpack the data, prepare for the training
   train_data, val_data = train_val_data
   train_src_l, train_dst_l, train_ts_l, train_e_idx_l, train_label_l = train_data
@@ -41,7 +41,7 @@ def train_val(train_val_data, model, mode, bs, epochs, criterion, optimizer, ear
       if s_idx == e_idx:
         continue
       batch_idx = idx_list[s_idx:e_idx] # shuffle training samples for each batch
-      np.random.shuffle(batch_idx)
+      # np.random.shuffle(batch_idx)
       src_l_cut, dst_l_cut = train_src_l[batch_idx], train_dst_l[batch_idx]
       ts_l_cut = train_ts_l[batch_idx]
       e_l_cut = train_e_idx_l[batch_idx]
@@ -71,6 +71,10 @@ def train_val(train_val_data, model, mode, bs, epochs, criterion, optimizer, ear
         m_loss.append(loss.item())
         auc.append(roc_auc_score(true_label, pred_score))
 
+    # neighborhood_store = torch.sparse_coo_tensor([[0], [0]], torch.zeros(1, 2, model_dim), (num_nodes, num_nodes, 2, model_dim)).to(device)
+    neighborhood_store = {}
+    model.update_neighborhood_encoder(neighborhood_store)
+    model.reset_raw_data()
     # validation phase use all information
     val_acc, val_ap, val_f1, val_auc = eval_one_epoch('val for {} nodes'.format(mode), model, val_rand_sampler, val_src_l,
                               val_dst_l, val_ts_l, val_label_l, val_e_idx_l)

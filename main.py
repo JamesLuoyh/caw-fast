@@ -126,7 +126,7 @@ device = torch.device('cuda:{}'.format(GPU))
 #       num_neighbors=NUM_NEIGHBORS, walk_n_head=WALK_N_HEAD, walk_mutual=WALK_MUTUAL, walk_linear_out=args.walk_linear_out,
 #       cpu_cores=CPU_CORES, verbosity=VERBOSITY, get_checkpoint_path=get_checkpoint_path)
 num_nodes = max_idx+1
-cawn = CAWN2(num_nodes, n_feat, e_feat, pos_dim=POS_DIM, n_head=ATTN_NUM_HEADS, drop_out=DROP_OUT, walk_linear_out=args.walk_linear_out, get_checkpoint_path=get_checkpoint_path)
+cawn = CAWN2(num_nodes, n_feat, e_feat, pos_dim=POS_DIM, n_head=ATTN_NUM_HEADS, num_neighbors=NUM_NEIGHBORS, dropout=DROP_OUT, walk_linear_out=args.walk_linear_out, get_checkpoint_path=get_checkpoint_path)
 cawn.to(device)
 neighborhood_store = []
 feat_dim = n_feat.shape[1]
@@ -135,7 +135,8 @@ time_dim = n_feat.shape[1]
 model_dim = feat_dim + e_feat_dim + time_dim
 # neighborhood_store.append(torch.sparse_coo_tensor(size=(num_nodes, num_nodes, model_dim),requires_grad=False).to(device)) # sparse tensor (node_idx, neighbor_idx, encoded_features)
 # neighborhood_store.append(torch.sparse_coo_tensor(size=(num_nodes, num_nodes, model_dim),requires_grad=False).to(device))
-neighborhood_store = torch.sparse_coo_tensor([[0], [0]], torch.zeros(1, 2, model_dim), (num_nodes, num_nodes, 2, model_dim)).to(device)
+# neighborhood_store = torch.sparse_coo_tensor([[0], [0]], torch.zeros(1, 2, model_dim), (num_nodes, num_nodes, 2, model_dim)).to(device)
+neighborhood_store = {}
 cawn.update_neighborhood_encoder(neighborhood_store)
 optimizer = torch.optim.Adam(cawn.parameters(), lr=LEARNING_RATE)
 criterion = torch.nn.BCELoss()
@@ -145,7 +146,7 @@ early_stopper = EarlyStopMonitor(tolerance=TOLERANCE)
 # train_val(train_val_data, cawn, args.mode, BATCH_SIZE, NUM_EPOCH, criterion, optimizer, early_stopper, ngh_finders, rand_samplers, logger)
 
 #YL optimized sampler
-train_val(train_val_data, cawn, args.mode, BATCH_SIZE, NUM_EPOCH, criterion, optimizer, early_stopper, ngh_finders, rand_samplers, logger)
+train_val(train_val_data, cawn, args.mode, BATCH_SIZE, NUM_EPOCH, criterion, optimizer, early_stopper, ngh_finders, rand_samplers, logger, model_dim, num_nodes)
 
 # final testing
 # cawn.update_ngh_finder(full_ngh_finder)  # remember that testing phase should always use the full neighbor finder
