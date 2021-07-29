@@ -22,10 +22,11 @@ class CAWN2(torch.nn.Module):
     self.node_raw_embed = torch.nn.Embedding.from_pretrained(self.n_feat_th, padding_idx=0, freeze=True)
     self.edge_raw_embed = torch.nn.Embedding.from_pretrained(self.e_feat_th, padding_idx=0, freeze=True)
     self.time_encoder = self.init_time_encoder() # fourier
-    # self.feature_encoder = self.init_feature_encoder() # LSTMCell
+    self.rev_time_encoder = self.init_time_encoder() # fourier
     self.agg_method = agg_method
     self.feature_encoder = self.init_feature_encoder() # RNNCell
     self.time_aggregator = self.init_time_aggregator() # RNNCell
+    self.rev_time_aggregator = self.init_time_aggregator() # RNNCell
     self.ngh_encoder = NeighborhoodEncoder(num_nodes, self.node_raw_embed, self.edge_raw_embed, self.time_encoder, self.e_feat_dim, self.time_dim, self.agg_method, dropout)
     # self.trainable_embedding = nn.Embedding(num_embeddings=3, embedding_dim=self.pos_dim) # position embedding
     # self.attn_model_dim = self.feat_model_dim + self.pos_dim
@@ -58,69 +59,81 @@ class CAWN2(torch.nn.Module):
     time_features = self.time_encoder(cut_time_th)
     e_idx_th = torch.from_numpy(e_idx_l).long().to(device)
     # edge_features = self.edge_raw_embed(e_idx_th)  # shape [batch, node_dim]
-    src_idx_th = torch.from_numpy(src_idx_l).long().to(device)
-    src_node_features = self.node_raw_embed(src_idx_th)  # shape [batch, node_dim]
-    tgt_idx_th = torch.from_numpy(tgt_idx_l).long().to(device)
-    tgt_node_features = self.node_raw_embed(tgt_idx_th)  # shape [batch, node_dim]
-    bad_idx_th = torch.from_numpy(bad_idx_l).long().to(device)
-    bad_node_features = self.node_raw_embed(bad_idx_th)  # shape [batch, node_dim]
+    src_idx_th = torch.from_numpy(src_idx_l).long()
+    tgt_idx_th = torch.from_numpy(tgt_idx_l).long()
+    bad_idx_th = torch.from_numpy(bad_idx_l).long()
     # src_features_combined = 
     src_idx_l_concat = np.concatenate((src_idx_l, tgt_idx_l), -1)
     tgt_idx_l_concat = np.concatenate((tgt_idx_l, src_idx_l), -1)
     src_idx_th_concat = torch.from_numpy(src_idx_l_concat).long()
     tgt_idx_th_concat = torch.from_numpy(tgt_idx_l_concat).long()
-
+    bs = len(src_idx_l)
     # if self.src_idx_l_prev is not None:
+    src_prev = tgt_prev = bad_prev = None
     if not test: 
-      self.update_neighborhood_state(src_idx_th_concat, device)
-    self.update_prev_raw_data(src_idx_th_concat, tgt_idx_th_concat, torch.cat((cut_time_th,cut_time_th), -1), torch.cat((e_idx_th, e_idx_th), -1), device)
+      src_prev = self.update_neighborhood_state(src_idx_th, cut_time_th, device)
+      tgt_prev = self.update_neighborhood_state(tgt_idx_th, cut_time_th, device)
+      bad_prev = self.update_neighborhood_state(bad_idx_th, cut_time_th, device) # need to update bad nodes neighborhood as well
+    self.update_prev_raw_data(src_idx_l_concat, src_idx_th_concat, tgt_idx_th_concat, torch.cat((cut_time_th,cut_time_th), -1), torch.cat((e_idx_th, e_idx_th), -1), device)
     # src_ngh_features = self.ngh_encoder.get(src_idx_l, device)
     # tgt_ngh_features = self.ngh_encoder.get(tgt_idx_l, device)
     # bad_ngh_features = self.ngh_encoder.get(bad_idx_l, device)
     
     end = time.time()
     # self.logger.info('grab subgraph for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
-    start = time.time()
-    end = time.time()
+    src_node_features = self.node_raw_embed(src_idx_th.to(device))  # shape [batch, node_dim]
+    tgt_node_features = self.node_raw_embed(tgt_idx_th.to(device))  # shape [batch, node_dim]
+    bad_node_features = self.node_raw_embed(bad_idx_th.to(device))  # shape [batch, node_dim]
     # self.logger.info('update subgraph for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
     start = time.time()
-    src_features = self.get_encoded_features(src_idx_l, src_node_features, time_features, device)
-    tgt_features = self.get_encoded_features(tgt_idx_l, tgt_node_features, time_features, device)
-    bad_features = self.get_encoded_features(bad_idx_l, bad_node_features, time_features, device)
+    src_f = self.get_encoded_features(src_idx_l, src_node_features, time_features, device)
+    tgt_f = self.get_encoded_features(tgt_idx_l, tgt_node_features, time_features, device)
+    bad_f = self.get_encoded_features(bad_idx_l, bad_node_features, time_features, device)
     end = time.time()
     # self.logger.info('src feat for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
-    pos_score = self.forward(src_idx_l, tgt_idx_l, cut_time_l, e_idx_l, (src_features, tgt_features), device)
-    neg_score1 = self.forward(src_idx_l, bad_idx_l, cut_time_l, e_idx_l, (src_features, bad_features), device)
-    if test: 
-      self.update_neighborhood_state(src_idx_th_concat, device)
+    pos_score = self.forward(src_idx_l, tgt_idx_l, cut_time_l, e_idx_l, (src_prev, tgt_prev), (src_f, tgt_f), device)
+    neg_score1 = self.forward(src_idx_l, bad_idx_l, cut_time_l, e_idx_l, (src_prev, bad_prev),(src_f, tgt_f), device)
+    if not test:
+      self.store_prev_states(src_prev, device)
+      self.store_prev_states(tgt_prev, device)
+      self.store_prev_states(bad_prev, device)
+    else: 
+      prev_states = self.update_neighborhood_state(src_idx_th_concat, torch.cat((cut_time_th, cut_time_th), -1), device)
+      # self.store_prev_states(prev_states, device)
     return pos_score.sigmoid(), neg_score1.sigmoid()
   
-  def update_prev_raw_data(self, src_idx_th, tgt_idx_th, cut_time_th, e_idx_th, device):
-    n_id, perm = src_idx_th.sort()
-    n_id, count = n_id.unique_consecutive(return_counts=True)
-    unique_idx = []
-    for i, idx in zip(n_id.tolist(), perm.split(count.tolist())):
-      unique_idx.append(idx[-1])
-    unique_idx = torch.stack(unique_idx)
-    src_idx_th = torch.index_select(src_idx_th, 0, unique_idx)
-    tgt_idx_th = torch.index_select(tgt_idx_th, 0, unique_idx)
-    unique_idx = unique_idx.to(device)
-    cut_time_th = torch.index_select(cut_time_th, 0, unique_idx)
-    e_idx_th = torch.index_select(e_idx_th, 0, unique_idx)
-    edge_features = self.edge_raw_embed(e_idx_th)
-    time_features = self.time_encoder(cut_time_th)
-    time_features = time_features.cpu()
-    edge_features = edge_features.cpu()
-    n_id = src_idx_th.tolist()
+  def store_prev_states(self, prev_states, device):
+    if prev_states is not None:
+      prev_src, prev_tgt, prev_e_hidden, prev_time_hidden = prev_states
+      self.ngh_encoder.update_hidden_state(prev_src, prev_tgt, prev_e_hidden.detach(), prev_time_hidden.detach(), device)
+
+  def update_prev_raw_data(self, src_idx_l, src_idx_th, tgt_idx_th, cut_time_th, e_idx_th, device):
+    start = time.time()
+    # n_id, perm = src_idx_th.sort()
+    # n_id, count = n_id.unique_consecutive(return_counts=True)
+    # unique_idx = []
+    # for i, idx in zip(n_id.tolist(), perm.split(count.tolist())):
+    #   unique_idx.append(idx[-1])
+    # unique_idx = torch.stack(unique_idx)
+    # src_idx_th = torch.index_select(src_idx_th, 0, unique_idx)
+    # tgt_idx_th = torch.index_select(tgt_idx_th, 0, unique_idx)
+    # unique_idx = unique_idx.to(device)
+    # cut_time_th = torch.index_select(cut_time_th, 0, unique_idx)
+    # e_idx_th = torch.index_select(e_idx_th, 0, unique_idx)
+    # n_id = src_idx_th.tolist()
     for i in range(len(src_idx_th)):
-      self.prev_raw_data[n_id[i]] = (src_idx_th[i], tgt_idx_th[i], time_features[i], edge_features[i])
-   
-  def update_neighborhood_state(self, src_idx_th, device):
+      self.prev_raw_data[src_idx_l[i]] = (src_idx_th[i], tgt_idx_th[i], cut_time_th[i], e_idx_th[i])
+    end = time.time()
+    # self.logger.info('encode ngh for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
+
+  def update_neighborhood_state(self, src_idx_th, cut_time_th, device, is_edge=False):
+    start = time.time()
     data = [self.prev_raw_data[i] if i in self.prev_raw_data else None for i in src_idx_th.tolist()]
     data = list(filter(lambda d: d is not None, data))
     if len(data) == 0:
-      return
-    src, tgt, ts_feat, e_feat = list(zip(*data))
+      return None
+    src, tgt, ts, e = list(zip(*data))
+
     # src = torch.LongTensor(src).to(device)
     # tgt = torch.LongTensor(tgt).to(device)
     # ts = torch.FloatTensor(ts).to(device)
@@ -136,30 +149,33 @@ class CAWN2(torch.nn.Module):
     # tgt_idx_l_concat = np.concatenate((self.tgt_idx_l_prev, self.src_idx_l_prev), -1)
     # src_idx_th = torch.from_numpy(self.src_idx_l_prev).long().to(device)
     # src_node_features = self.node_raw_embed(src_idx_th)  # shape [batch, node_dim]
-    # tgt_idx_th = torch.from_numpy(self.tgt_idx_l_prev).long().to(device)
+    # tgt_idx_th =- torch.from_numpy(self.tgt_idx_l_prev).long().to(device)
     # tgt_node_features = self.node_raw_embed(tgt_idx_th)  # shape [batch, node_dim]
     
-    # src_idx_th = [:, 0]
-    # cut_time_th = [:, 0]
+    # time_diff = cut_time_th - ts
+
+    e_feat = self.edge_raw_embed(torch.stack(e))
+    ts_feat = self.time_encoder(torch.stack(ts))
     src_idx_l = np.array(src)
     tgt_idx_l = np.array(tgt)
     # hidden_state, hidden_embeddings, time_features, edge_features = 
     e_hidden_state, time_hidden_state = self.ngh_encoder.retrieve_hidden_state(src_idx_l, tgt_idx_l, device)
-    start = time.time()
-    e_hidden_state = self.feature_encoder(torch.stack(e_feat).to(device), e_hidden_state) # TODO: pass node embedding
-    time_hidden_state = self.time_aggregator(torch.stack(ts_feat).to(device), time_hidden_state)
+    
+    e_hidden_state = self.feature_encoder(e_feat, e_hidden_state, use_dropout=False) # TODO: pass node embedding
+    time_hidden_state = self.time_aggregator(ts_feat, time_hidden_state, use_dropout=False)
 
-    end = time.time()
-    # self.logger.info('encode ngh for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
+    
     # hidden_state, cell_state = self.feature_encoder(hidden_embeddings, time_features, edge_features, hidden_state)
     # hidden_state = hidden_state.unsqueeze(-2)
     # cell_state = cell_state.unsqueeze(-2)
     # hidden_state = torch.cat((hidden_state, cell_state), -2)
     if self.agg_method == 'gru':
-      self.ngh_encoder.update_hidden_state(src_idx_l, tgt_idx_l, e_hidden_state.detach(), time_hidden_state.detach(), device)
+      self.ngh_encoder.update_hidden_state(src_idx_l, tgt_idx_l, e_hidden_state, time_hidden_state, device)
     else:
       self.ngh_encoder.update_hidden_state(src_idx_l, tgt_idx_l, (e_hidden_state[0].detach(), e_hidden_state[1].detach()), (time_hidden_state[0].detach(), time_hidden_state[1].detach()), device)
-
+    end = time.time()
+    # self.logger.info('encode prev for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
+    return (src_idx_l, tgt_idx_l, e_hidden_state, time_hidden_state)
   # def relative_node_features(self, src_idx_l, ngh_features):
   #   start = time.time()
   #   src_ngh_features, tgt_ngh_features = ngh_features
@@ -180,79 +196,140 @@ class CAWN2(torch.nn.Module):
   #   # self.logger.info('relative_node_feat for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
   #   return relative_node_feat, mask
 
-  def get_agg_features(self, src_idx_l, tgt_idx_l, src_features, device):
+  def get_agg_features(self, src_idx_l, tgt_idx_l, prev_feat, src_features, device):
+    src_prev, tgt_prev = prev_feat
     start = time.time()
     src_e_feat, src_t_feat = src_features
-    src_e_feat = src_e_feat.cpu()
-    src_t_feat = src_t_feat.cpu()
+    src_e_feat = src_e_feat
+    src_t_feat = src_t_feat
+
     # node_feat = torch.zeros((len(src_idx_l), self.num_neighbors, self.feat_dim)).float()
     # edge_feat = torch.zeros((len(src_idx_l), self.num_neighbors, self.e_feat_dim)).float()
     # relative_feat = torch.zeros((len(src_idx_l), self.num_neighbors, self.time_dim)).float()
     # time_feat = torch.zeros((len(src_idx_l), self.num_neighbors, self.time_dim)).float()
-    ngh_agg_feat = torch.zeros((len(src_idx_l), self.num_neighbors, self.attn_dim)).float()
-    src_agg_feat = torch.zeros((len(src_idx_l), 1, self.attn_dim)).float()
-    mask = torch.zeros((len(src_idx_l), self.num_neighbors), dtype=torch.bool)
+    ngh_agg_feat = torch.zeros((len(src_idx_l), self.num_neighbors, self.attn_dim)).float().to(device)
+    src_agg_feat = torch.zeros((len(src_idx_l), 1, self.attn_dim)).float().to(device)
+    mask = torch.ones((len(src_idx_l), self.num_neighbors), dtype=torch.bool).to(device)
     for i in range(len(src_idx_l)):
       s = src_idx_l[i]
+      s_th = torch.LongTensor([s])
       t = tgt_idx_l[i]
+      # start = time.time()
       if s in self.neighborhood_store:
         sampled_idx = self.neighborhood_store[s].keys()
-        if len(sampled_idx) > self.num_neighbors:
-          sampled_idx = random.sample(sampled_idx, self.num_neighbors)
-        sample_idx_l = list(sampled_idx)
+        # sampled_feat = self.neighborhood_store[s].values()
+        sampled_ngh_l = list(sampled_idx)
+        # if len(sampled_idx) > 0:
+        #   sampled_e_feat_th = torch.stack([h[0] for h in sampled_feat])
+        #   sampled_t_feat_th = torch.stack([h[1] for h in sampled_feat])
+        # else:
+        #   sampled_e_feat_th = sampled_t_feat_th = None
+        # if src_prev is not None:
+        #   prev_idx, = np.where(src_prev[0] == s)
+        #   if len(prev_idx) != 0:
+        #     prev_ngh_l = np.take(src_prev[1], [prev_idx[-1]]) 
+        #     prev_idx = torch.LongTensor([prev_idx[-1]])
+        #     prev_e_th = torch.index_select(src_prev[2].cpu(), 0, prev_idx)
+        #     prev_t_th = torch.index_select(src_prev[3].cpu(), 0, prev_idx)
+        #     if len(sampled_idx) > 0:
+        #       sampled_ngh_l = np.concatenate((sampled_ngh_l, prev_ngh_l), axis=0)
+        #       sampled_e_feat_th = torch.cat((sampled_e_feat_th, prev_e_th), 0)
+        #       sampled_t_feat_th = torch.cat((sampled_t_feat_th, prev_t_th), 0)
+        #     else:
+        #       sampled_ngh_l = prev_ngh_l
+        #       sampled_e_feat_th = prev_e_th
+        #       sampled_t_feat_th = prev_t_th
+        sampled_len = len(sampled_ngh_l)
+        if sampled_len > self.num_neighbors:
+          sampled_idx = np.random.permutation(sampled_len)[:self.num_neighbors]
+          sampled_ngh_l = np.take(sampled_ngh_l, sampled_idx)
+        sampled_e_feat_th = torch.stack([self.neighborhood_store[s][h][0] for h in sampled_ngh_l])
+        sampled_t_feat_th = torch.stack([self.neighborhood_store[s][h][1] for h in sampled_ngh_l])
+        # sample_idx_l = sampled_idx
+        sampled_ngh_feat_th = self.node_raw_embed(torch.LongTensor(sampled_ngh_l).to(device))
       else:
+        sampled_len = 0
         sample_idx_l = []
-      sample_idx_l.append(s)
-      i_n_feat = self.node_raw_embed(torch.LongTensor(sample_idx_l).to(device)).cpu()
-      src_n_feat = i_n_feat[-1]
-      i_n_feat = i_n_feat[:-1]
-      sample_idx_l = sample_idx_l[:-1]
-      if len(sample_idx_l) > 0:
-        i_hidden = [self.neighborhood_store[s][n] for n in sample_idx_l]
-        if self.agg_method == 'gru':
-          i_e_feat = torch.stack([h[0] for h in i_hidden])
-          i_t_feat = torch.stack([h[1] for h in i_hidden])
-        else:
-          i_e_feat = torch.stack([h[0][0] for h in i_hidden])
-          i_t_feat = torch.stack([h[1][0] for h in i_hidden])
+      # end = time.time()
+      # self.logger.info('relative_node_feat 1 for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
+      # start = time.time()
+      # if tgt_prev is not None:
+      #   t_prev_idx, = np.where(tgt_prev[0] == t)
+      # else:
+      t_prev_idx = []
+      if sampled_len > 0:
+      #   i_hidden = []
+      #   for n in sample_idx_l:
+      #     if n in self.neighborhood_store[s]:
+      #       i_hidden.append(self.neighborhood_store[s][n])
+      #     else:
+      #       i_hidden.append()
+      #   if self.agg_method == 'gru':
+      #     i_e_feat = torch.stack([h[0] for h in i_hidden])
+      #     i_t_feat = torch.stack([h[1] for h in i_hidden])
+      #   else:
+      #     i_e_feat = torch.stack([h[0][0] for h in i_hidden])
+      #     i_t_feat = torch.stack([h[1][0] for h in i_hidden])
         if t in self.neighborhood_store:
           if self.agg_method == 'gru':
+            # tgt_t_feat = []
+            # for n in sampled_ngh_l:
+            #   if n in self.neighborhood_store[t]:
+            #     tgt_t_feat.append(self.neighborhood_store[t][n][1])
+            #   # elif len(t_prev_idx) != 0 and np.take(tgt_prev[1], t_prev_idx[-1]) == n:
+            #   #   tgt_t_feat.append(torch.index_select(tgt_prev[3].cpu(), 0, torch.LongTensor([t_prev_idx[-1]]))[0])
+            #   else:
+            #     tgt_t_feat.append(torch.zeros(self.time_dim).float())
+            # # tgt_t_feat = torch.stack([self.neighborhood_store[t][n][1]
+            # #   if n in self.neighborhood_store[t] else torch.zeros(self.time_dim).float() for n in sample_idx_l])
+            # tgt_t_feat = torch.stack(tgt_t_feat)
             tgt_t_feat = torch.stack([self.neighborhood_store[t][n][1]
-              if n in self.neighborhood_store[t] else torch.zeros(self.time_dim).float() for n in sample_idx_l])
+              if n in self.neighborhood_store[t] else torch.zeros(self.time_dim).float().to(device) for n in sampled_ngh_l])
           else:
             tgt_t_feat = torch.stack([self.neighborhood_store[t][n][1][0]
               if n in self.neighborhood_store[t] else torch.zeros(self.time_dim).float() for n in sample_idx_l])
-          # relative_node_feat = i_t_feat + tgt_t_feat
-          relative_node_feat = tgt_t_feat
+          relative_node_feat = sampled_t_feat_th + tgt_t_feat
+          # relative_node_feat = tgt_t_feat
         else:
-          relative_node_feat = torch.zeros_like(i_t_feat)
+          relative_node_feat = sampled_t_feat_th
         # node_feat[i,:len(sampled_idx),:] = i_n_feat
         # edge_feat[i,:len(sampled_idx),:] = i_e_feat
         # time_feat[i,:len(sampled_idx),:] = i_t_feat
         # relative_feat[i,:len(sampled_idx),:] = relative_node_feat
-        ngh_agg_feat[i,:len(sample_idx_l),:] = torch.cat((i_n_feat, i_e_feat, i_t_feat, relative_node_feat), -1)
-        mask[i,:len(sample_idx_l)] = True
-
+        ngh_agg_feat[i,:sampled_len,:] = torch.cat((sampled_ngh_feat_th, sampled_e_feat_th, sampled_t_feat_th, relative_node_feat), -1)
+        mask[i,:sampled_len] = False
+      # end = time.time()
+      # self.logger.info('relative_node_feat 2 for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
+      # start = time.time()
       if t in self.neighborhood_store and s in self.neighborhood_store[t]:
         if self.agg_method == 'gru':
           s_in_t = self.neighborhood_store[t][s][1]
         else:
           s_in_t = self.neighborhood_store[t][s][1][0]
+      # elif len(t_prev_idx) != 0 and np.take(tgt_prev[1], t_prev_idx[-1]) == s:
+      #   start_inner = time.time()
+      #   s_in_t = torch.index_select(tgt_prev[3].cpu(), 0, torch.LongTensor([t_prev_idx[-1]]))[0]
+      #   end_inner = time.time()
+        # self.logger.info('relative_node_feat end_inner for the minibatch, time eclipsed: {} seconds'.format(str(end_inner-start_inner)))
       else:
-        s_in_t = torch.zeros(self.time_dim).float()
-      # relative_node_feat_src = src_t_feat[i] + s_in_t
-      relative_node_feat_src = s_in_t
-      src_agg_feat[i,0] = torch.cat((src_n_feat, src_e_feat[i], src_t_feat[i], relative_node_feat_src), -1)
-
+        s_in_t = torch.zeros(self.time_dim).float().to(device)
+      relative_node_feat_src = src_t_feat[i] + s_in_t
+      # relative_node_feat_src = s_in_t
+      src_n_feat = self.node_raw_embed(s_th.to(device))
+      src_agg_feat[i,0] = torch.cat((src_n_feat[0], src_e_feat[i], src_t_feat[i], relative_node_feat_src), -1)
+      # end = time.time()
+      # self.logger.info('relative_node_feat 3 for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
     end = time.time()
     # self.logger.info('relative_node_feat for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
-    return src_agg_feat.to(device), ngh_agg_feat.to(device), mask.to(device)
+    return src_agg_feat, ngh_agg_feat, mask
 
-  def forward(self, src_idx_l, tgt_idx_l, cut_time_l, e_idx_l, origin_features, device):
+  def forward(self, src_idx_l, tgt_idx_l, cut_time_l, e_idx_l, prev_feat, origin_feat, device):
     start = time.time()
-    src_features, tgt_features = origin_features
-    src_agg_feat, src_ngh_agg_feat, src_mask = self.get_agg_features(src_idx_l, tgt_idx_l, src_features, device)
-    tgt_agg_feat, tgt_ngh_agg_feat, tgt_mask = self.get_agg_features(tgt_idx_l, tgt_idx_l, tgt_features, device)
+    bs = len(src_idx_l)
+    src_feat, tgt_feat = origin_feat
+    src_prev, tgt_prev = prev_feat
+    src_agg_feat, src_ngh_agg_feat, src_mask = self.get_agg_features(src_idx_l, tgt_idx_l, prev_feat, src_feat, device)
+    tgt_agg_feat, tgt_ngh_agg_feat, tgt_mask = self.get_agg_features(tgt_idx_l, src_idx_l, (tgt_prev, src_prev), tgt_feat, device)
 
     # src_ngh_features, tgt_ngh_features = ngh_features
     # 
@@ -293,12 +370,13 @@ class CAWN2(torch.nn.Module):
     # concat src and tgt to replace pos_encoding
     # src_embed, _ = self.attn_m(src_features.unsqueeze(1), src_origin_encode.unsqueeze(1), src_ngh_features_dense, src_pos_encode, src_mask)
     # tgt_embed, _ = self.attn_m(tgt_features.unsqueeze(1), tgt_origin_encode.unsqueeze(1), tgt_ngh_features_dense, tgt_pos_encode, tgt_mask)
-    src_embed, _ = self.attn_m(src_agg_feat, src_ngh_agg_feat, src_mask)
-    tgt_embed, _ = self.attn_m(tgt_agg_feat, tgt_ngh_agg_feat, tgt_mask)
-
+    embed, _ = self.attn_m(torch.cat((src_agg_feat,tgt_agg_feat), 0), torch.cat((src_ngh_agg_feat, tgt_ngh_agg_feat), 0), torch.cat((src_mask, tgt_mask), 0))
+    embed = embed[0].squeeze(1)
+    src_embed = embed[:bs]
+    tgt_embed = embed[bs:]
     # src_embedding
     # tgt_embedding
-    score, score_walk = self.affinity_score(src_embed[0].squeeze(1), tgt_embed[0].squeeze(1))
+    score, score_walk = self.affinity_score(src_embed, tgt_embed)
     score.squeeze_(dim=-1)
     end = time.time()
     # self.logger.info('self attention for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
@@ -312,15 +390,17 @@ class CAWN2(torch.nn.Module):
     # # cell_state = torch.index_select(torch.index_select(cell_init.coalesce(), 0, src_idx_th), 1, src_idx_th)
     # # cell_state = torch.diagonal(cell_state.to_dense(),0).T
     # edge_features = torch.zeros((len(src_idx_l), self.e_feat_dim)).float().to(device)
+    start = time.time()
     edge_hidden = torch.zeros((len(src_idx_l), self.e_feat_dim)).float().to(device)
     # print(hidden_state.shape)
     time_hidden = torch.zeros(len(src_idx_l), self.time_dim).to(device)
     if self.agg_method == 'gru':
-      time_hidden = self.time_aggregator(time_features, time_hidden)
+      time_hidden = self.time_aggregator(time_features, time_hidden, use_dropout=False)
     else:
       time_cell = torch.zeros(len(src_idx_l), self.time_dim).to(device)
-      time_hidden = self.time_aggregator(time_features, (time_hidden,time_cell))[0]
-
+      time_hidden = self.time_aggregator(time_features, (time_hidden,time_cell), use_dropout=False)[0]
+    end = time.time()
+    # self.logger.info('get_encoded_features for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
     # hidden_state, cell_state = self.feature_encoder(src_node_features, time_features, edge_features, hidden_state, use_dropout=False) # LSTMCell
     return (edge_hidden, time_hidden)
 
@@ -375,63 +455,6 @@ class CAWN2(torch.nn.Module):
     else:
       return FeatureEncoderLSTM(self.time_dim, self.time_dim, self.dropout)
 
-class AttnModel(torch.nn.Module):
-  """Attention based temporal layers
-  """
-  def __init__(self, feat_dim, pos_dim, model_dim, n_head=2, drop_out=0.1):
-    """
-    args:
-      feat_dim: dim for the node features
-      n_head: number of heads in attention
-      drop_out: probability of dropping a neural.
-    """
-    super(AttnModel, self).__init__()
-
-    self.feat_dim = feat_dim
-    self.pos_dim = pos_dim
-    self.model_dim = model_dim
-
-    self.merger = MergeLayer(self.model_dim, model_dim, feat_dim, feat_dim)
-
-    assert(self.model_dim % n_head == 0)
-    self.logger = logging.getLogger(__name__)
-    self.multi_head_target = MultiHeadAttention(n_head,
-                     d_model=self.model_dim,
-                     d_k=self.model_dim // n_head,
-                     d_v=self.model_dim // n_head,
-                     dropout=drop_out)
-    self.logger.info('Using scaled prod attention')
-
-  def forward(self, src, seq, mask, src_p=None, seq_p=None):
-    """"Attention based temporal attention forward pass
-    args:
-      src: float Tensor of shape [B, N_src, D]
-      seq: float Tensor of shape [B, N_ngh, D]
-      mask: boolean Tensor of shape [B, N_ngh], where the true value indicate a null value in the sequence.
-
-    returns:
-      output, weight
-
-      output: float Tensor of shape [B, D]
-      weight: float Tensor of shape [B, N]
-    """
-
-    batch, N_src, _ = src.shape
-    N_ngh = seq.shape[1]
-    device = src.device
-    src_p_pad, seq_p_pad = src_p, seq_p
-    # if src_p is None:
-    #   src_p_pad = torch.zeros((batch, N_src, self.pos_dim)).float().to(device)
-    #   seq_p_pad = torch.zeros((batch, N_ngh, self.pos_dim)).float().to(device)
-    q = src
-    k = seq
-    if src_p is not None:
-      q = torch.cat([src, src_p_pad], dim=2) # [B, N_src, D + De + Dt] -> [B, N_src, D]
-      k = torch.cat([seq, seq_p_pad], dim=2) # [B, N_ngh, D + De + Dt] -> [B, N_ngh, D]
-    output, attn = self.multi_head_target(q=q, k=k, v=k, mask=mask) # output: [B, N_src, D + De + Dt], attn: [B, N_src, n_head, num_neighbors]
-    output = self.merger(output, src)
-    return output, attn
-
 class NeighborhoodEncoder:
   def __init__(self, num_nodes, node_raw_embed, edge_raw_embed, time_encoder, e_feat_dim, time_dim, agg_method='gru', dropout=0.1):
     self.logger = logging.getLogger(__name__)
@@ -459,7 +482,7 @@ class NeighborhoodEncoder:
         t = tgt_l[i]
         if t not in self.neighborhood_store[s]:
           if self.agg_method == 'gru':
-            self.neighborhood_store[s][t] = (torch.zeros(self.e_feat_dim), torch.zeros(self.time_dim))
+            self.neighborhood_store[s][t] = (torch.zeros(self.e_feat_dim).to(device), torch.zeros(self.time_dim).to(device))
           else:
             self.neighborhood_store[s][t] = ((torch.zeros(self.e_feat_dim), torch.zeros(self.e_feat_dim)),
               (torch.zeros(self.time_dim), torch.zeros(self.time_dim)))
@@ -497,7 +520,7 @@ class NeighborhoodEncoder:
     end = time.time()
     # self.logger.info('encode, time eclipsed: {} seconds'.format(str(end-start)))
     if self.agg_method == 'gru':
-      return (torch.stack(e_hidden_state).to(device), torch.stack(time_hidden_state).to(device))
+      return (torch.stack(e_hidden_state), torch.stack(time_hidden_state))
     else:
       return ((torch.stack(e_hidden_state).to(device), torch.stack(e_cell_state).to(device)), (torch.stack(time_hidden_state).to(device), torch.stack(time_cell_state).to(device)))
 
@@ -513,13 +536,18 @@ class NeighborhoodEncoder:
       s = src_l[i]
       t = tgt_l[i]
       if self.agg_method == 'gru':
-        self.neighborhood_store[s][t] = (e_hidden_state[i].cpu(), time_hidden_state[i].cpu())
+        self.neighborhood_store[s][t] = (e_hidden_state[i], time_hidden_state[i])
       else:
         self.neighborhood_store[s][t] = ((e_hidden_state[0][i],e_hidden_state[1][i]), (time_hidden_state[0][i], time_hidden_state[1][i]))
     end = time.time()
     # self.logger.info('put back, time eclipsed: {} seconds'.format(str(end-start)))
   
-
+  def remove_hidden_state(self, src_l, tgt_l):
+    for i in range(len(src_l)):
+      s = src_l[i]
+      t = tgt_l[i]
+      self.neighborhood_store[s].pop(t, None)
+  
   def get_ngh(self):
     return self.neighborhood_store
 
@@ -724,6 +752,63 @@ class TimeEncode(torch.nn.Module):
     harmonic = torch.cos(map_ts)
 
     return harmonic #self.dense(harmonic)
+
+class AttnModel(torch.nn.Module):
+  """Attention based temporal layers
+  """
+  def __init__(self, feat_dim, pos_dim, model_dim, n_head=2, drop_out=0.1):
+    """
+    args:
+      feat_dim: dim for the node features
+      n_head: number of heads in attention
+      drop_out: probability of dropping a neural.
+    """
+    super(AttnModel, self).__init__()
+
+    self.feat_dim = feat_dim
+    self.pos_dim = pos_dim
+    self.model_dim = model_dim
+
+    self.merger = MergeLayer(self.model_dim, model_dim, feat_dim, feat_dim)
+
+    assert(self.model_dim % n_head == 0)
+    self.logger = logging.getLogger(__name__)
+    self.multi_head_target = MultiHeadAttention(n_head,
+                     d_model=self.model_dim,
+                     d_k=self.model_dim // n_head,
+                     d_v=self.model_dim // n_head,
+                     dropout=drop_out)
+    self.logger.info('Using scaled prod attention')
+
+  def forward(self, src, seq, mask, src_p=None, seq_p=None):
+    """"Attention based temporal attention forward pass
+    args:
+      src: float Tensor of shape [B, N_src, D]
+      seq: float Tensor of shape [B, N_ngh, D]
+      mask: boolean Tensor of shape [B, N_ngh], where the true value indicate a null value in the sequence.
+
+    returns:
+      output, weight
+
+      output: float Tensor of shape [B, D]
+      weight: float Tensor of shape [B, N]
+    """
+
+    batch, N_src, _ = src.shape
+    N_ngh = seq.shape[1]
+    device = src.device
+    src_p_pad, seq_p_pad = src_p, seq_p
+    # if src_p is None:
+    #   src_p_pad = torch.zeros((batch, N_src, self.pos_dim)).float().to(device)
+    #   seq_p_pad = torch.zeros((batch, N_ngh, self.pos_dim)).float().to(device)
+    q = src
+    k = seq
+    if src_p is not None:
+      q = torch.cat([src, src_p_pad], dim=2) # [B, N_src, D + De + Dt] -> [B, N_src, D]
+      k = torch.cat([seq, seq_p_pad], dim=2) # [B, N_ngh, D + De + Dt] -> [B, N_ngh, D]
+    output, attn = self.multi_head_target(q=q, k=k, v=k, mask=mask) # output: [B, N_src, D + De + Dt], attn: [B, N_src, n_head, num_neighbors]
+    output = self.merger(output, src)
+    return output, attn
 
 class MultiHeadAttention(nn.Module):
   ''' Multi-Head Attention module '''

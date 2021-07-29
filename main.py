@@ -89,6 +89,22 @@ train_data = train_src_l, train_dst_l, train_ts_l, train_e_idx_l, train_label_l
 val_data = val_src_l, val_dst_l, val_ts_l, val_e_idx_l, val_label_l
 train_val_data = (train_data, val_data)
 
+# ngh = {}
+# for i in range(len(train_src_l)):
+#   s = train_src_l[i]
+#   t = train_dst_l[i]
+#   if s not in ngh:
+#     ngh[s] = {}
+#   if t not in ngh:
+#     ngh[t] = {}
+#   for k in ngh[s].keys():
+#     if k in ngh[t]:
+#       print("BUG"*30)
+#   ngh[s][t] = 1
+#   ngh[t][s] = 1
+# print("OK"*30)
+
+
 # create two neighbor finders to handle graph extraction.
 # for transductive mode all phases use full_ngh_finder, for inductive node train/val phases use the partial one
 # while test phase still always uses the full one
