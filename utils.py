@@ -31,17 +31,37 @@ class EarlyStopMonitor(object):
     return self.num_round >= self.max_round
 
 
+# class RandEdgeSampler(object):
+#   def __init__(self, src_list, dst_list):
+#     src_list = np.concatenate(src_list)
+#     dst_list = np.concatenate(dst_list)
+#     self.src_list = np.unique(src_list)
+#     self.dst_list = np.unique(dst_list)
+
+#   def sample(self, size):
+#     src_index = np.random.randint(0, len(self.src_list), size)
+#     dst_index = np.random.randint(0, len(self.dst_list), size)
+#     return self.src_list[src_index], self.dst_list[dst_index]
+
 class RandEdgeSampler(object):
-  def __init__(self, src_list, dst_list):
-    src_list = np.concatenate(src_list)
-    dst_list = np.concatenate(dst_list)
-    self.src_list = np.unique(src_list)
-    self.dst_list = np.unique(dst_list)
+  def __init__(self, src_list, src_start, src_nngh, dst_list, tgt_start, tgt_nngh):
+    src_list = np.flip(np.concatenate(src_list))
+    dst_list = np.flip(np.concatenate(dst_list))
+    src_nngh = np.flip(np.concatenate(src_nngh))
+    tgt_nngh = np.flip(np.concatenate(tgt_nngh))
+    src_start = np.flip(np.concatenate(src_start))
+    tgt_start = np.flip(np.concatenate(tgt_start))
+    self.src_list, src_idx = np.unique(src_list, return_index=True)
+    self.dst_list, dst_idx = np.unique(dst_list, return_index=True)
+    self.src_nngh = src_nngh[src_idx]
+    self.tgt_nngh = tgt_nngh[dst_idx]
+    self.src_start = src_start[src_idx]
+    self.tgt_start = tgt_start[dst_idx]
 
   def sample(self, size):
     src_index = np.random.randint(0, len(self.src_list), size)
     dst_index = np.random.randint(0, len(self.dst_list), size)
-    return self.src_list[src_index], self.dst_list[dst_index]
+    return self.src_list[src_index], self.src_start[src_index], self.src_nngh[src_index], self.dst_list[dst_index], self.tgt_start[dst_index], self.tgt_nngh[dst_index]
 
 
 def set_random_seed(seed):

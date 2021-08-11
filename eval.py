@@ -6,7 +6,7 @@ from sklearn.metrics import f1_score
 from sklearn.metrics import roc_auc_score
 
 
-def eval_one_epoch(hint, tgan, sampler, src, dst, ts, label, val_e_idx_l=None):
+def eval_one_epoch(hint, tgan, sampler, src, tgt, ts, label, e_id, src_e, tgt_e, src_start, tgt_start, src_ngh_n, tgt_ngh_n, tgt_post_n):
   val_acc, val_ap, val_f1, val_auc = [], [], [], []
   with torch.no_grad():
     tgan = tgan.eval()
@@ -22,15 +22,21 @@ def eval_one_epoch(hint, tgan, sampler, src, dst, ts, label, val_e_idx_l=None):
       if s_idx == e_idx:
         continue
       src_l_cut = src[s_idx:e_idx]
-      dst_l_cut = dst[s_idx:e_idx]
+      tgt_l_cut = tgt[s_idx:e_idx]
       ts_l_cut = ts[s_idx:e_idx]
-      e_l_cut = val_e_idx_l[s_idx:e_idx] if (val_e_idx_l is not None) else None
+      e_l_cut = e_id[s_idx:e_idx] if (e_idx is not None) else None
       # label_l_cut = label[s_idx:e_idx]
 
+      src_e_l, tgt_e_l, src_start_l, tgt_start_l, src_ngh_n_l, tgt_ngh_n_l = src_e[s_idx:e_idx], tgt_e[s_idx:e_idx], src_start[s_idx:e_idx], tgt_start[s_idx:e_idx], src_ngh_n[s_idx:e_idx], tgt_ngh_n[s_idx:e_idx]
       size = len(src_l_cut)
-      src_l_fake, dst_l_fake = sampler.sample(size)
-
-      pos_prob, neg_prob = tgan.contrast(src_l_cut, dst_l_cut, dst_l_fake, ts_l_cut, e_l_cut, test=True)
+      # src_l_fake, dst_l_fake = sampler.sample(size)
+      _, _, _, bad_l_cut, bad_start_l, bad_ngh_n_l = sampler.sample(size)
+      # bad_idx = np.random.randint(0, e_idx, size)
+      # bad_l_cut, bad_start_l, bad_ngh_n_l = tgt[bad_idx], tgt_start[bad_idx], tgt_post_n[bad_idx]
+      src_l = (src_l_cut, src_e_l, src_start_l, src_ngh_n_l)
+      tgt_l = (tgt_l_cut, tgt_e_l, tgt_start_l, tgt_ngh_n_l)
+      bad_l = (bad_l_cut, None, bad_start_l, bad_ngh_n_l)
+      pos_prob, neg_prob = tgan.contrast(src_l, tgt_l, bad_l, ts_l_cut, e_l_cut, test=True)
 
       pred_score = np.concatenate([(pos_prob).cpu().numpy(), (neg_prob).cpu().numpy()])
       pred_label = pred_score > 0.5

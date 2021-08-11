@@ -41,7 +41,7 @@ set_random_seed(SEED)
 logger, get_checkpoint_path, best_model_path = set_up_logger(args, sys_argv)
 
 # Load data and sanity check
-g_df = pd.read_csv('./processed/ml_{}.csv'.format(DATA))
+g_df = pd.read_csv('./processed/ml2_{}.csv'.format(DATA))
 e_feat = np.load('./processed/ml_{}.npy'.format(DATA))
 n_feat = np.load('./processed/ml_{}_node.npy'.format(DATA))
 src_l = g_df.u.values
@@ -49,7 +49,16 @@ dst_l = g_df.i.values
 e_idx_l = g_df.idx.values
 label_l = g_df.label.values
 ts_l = g_df.ts.values
+src_e_l = g_df.e_from_u.values
+tgt_e_l = g_df.e_from_i.values
+src_start_l = g_df.u_start.values
+tgt_start_l = g_df.i_start.values
+src_ngh_n_l = g_df.u_ngh_n.values
+tgt_ngh_n_l = g_df.i_ngh_n.values
+tgt_post_n_l = g_df.i_post_n.values
+
 max_idx = max(src_l.max(), dst_l.max())
+max_e_idx = max(src_e_l.max(), tgt_e_l.max()) + 10
 assert(np.unique(np.stack([src_l, dst_l])).shape[0] == max_idx)  # all nodes except node 0 should appear and be compactly indexed
 assert(n_feat.shape[0] == max_idx + 1)  # the nodes need to map one-to-one to the node feat matrix
 
@@ -79,14 +88,14 @@ else:
   logger.info('Sampled {} nodes (10 %) which are masked in training and reserved for testing...'.format(len(mask_node_set)))
 
 # split data according to the mask
-train_src_l, train_dst_l, train_ts_l, train_e_idx_l, train_label_l = src_l[valid_train_flag], dst_l[valid_train_flag], ts_l[valid_train_flag], e_idx_l[valid_train_flag], label_l[valid_train_flag]
-val_src_l, val_dst_l, val_ts_l, val_e_idx_l, val_label_l = src_l[valid_val_flag], dst_l[valid_val_flag], ts_l[valid_val_flag], e_idx_l[valid_val_flag], label_l[valid_val_flag]
-test_src_l, test_dst_l, test_ts_l, test_e_idx_l, test_label_l = src_l[valid_test_flag], dst_l[valid_test_flag], ts_l[valid_test_flag], e_idx_l[valid_test_flag], label_l[valid_test_flag]
+train_src_l, train_dst_l, train_ts_l, train_e_idx_l, train_label_l, train_src_e_l, train_tgt_e_l, train_src_start_l, train_tgt_start_l, train_src_ngh_n_l, train_tgt_ngh_n_l, train_tgt_post_n_l = src_l[valid_train_flag], dst_l[valid_train_flag], ts_l[valid_train_flag], e_idx_l[valid_train_flag], label_l[valid_train_flag], src_e_l[valid_train_flag], tgt_e_l[valid_train_flag], src_start_l[valid_train_flag], tgt_start_l[valid_train_flag], src_ngh_n_l[valid_train_flag], tgt_ngh_n_l[valid_train_flag], tgt_post_n_l[valid_train_flag]
+val_src_l, val_dst_l, val_ts_l, val_e_idx_l, val_label_l, val_src_e_l, val_tgt_e_l, val_src_start_l, val_tgt_start_l, val_src_ngh_n_l, val_tgt_ngh_n_l, val_tgt_post_n_l = src_l[valid_val_flag], dst_l[valid_val_flag], ts_l[valid_val_flag], e_idx_l[valid_val_flag], label_l[valid_val_flag], src_e_l[valid_val_flag], tgt_e_l[valid_val_flag], src_start_l[valid_val_flag], tgt_start_l[valid_val_flag], src_ngh_n_l[valid_val_flag], tgt_ngh_n_l[valid_val_flag], tgt_post_n_l[valid_val_flag]
+test_src_l, test_dst_l, test_ts_l, test_e_idx_l, test_label_l, test_src_e_l, test_tgt_e_l, test_src_start_l, test_tgt_start_l, test_src_ngh_n_l, test_tgt_ngh_n_l, test_tgt_post_n_l = src_l[valid_test_flag], dst_l[valid_test_flag], ts_l[valid_test_flag], e_idx_l[valid_test_flag], label_l[valid_test_flag], src_e_l[valid_test_flag], tgt_e_l[valid_test_flag], src_start_l[valid_test_flag], tgt_start_l[valid_test_flag], src_ngh_n_l[valid_test_flag], tgt_ngh_n_l[valid_test_flag], tgt_post_n_l[valid_test_flag]
 if args.mode == 'i':
-  test_src_new_new_l, test_dst_new_new_l, test_ts_new_new_l, test_e_idx_new_new_l, test_label_new_new_l = src_l[valid_test_new_new_flag], dst_l[valid_test_new_new_flag], ts_l[valid_test_new_new_flag], e_idx_l[valid_test_new_new_flag], label_l[valid_test_new_new_flag]
-  test_src_new_old_l, test_dst_new_old_l, test_ts_new_old_l, test_e_idx_new_old_l, test_label_new_old_l = src_l[valid_test_new_old_flag], dst_l[valid_test_new_old_flag], ts_l[valid_test_new_old_flag], e_idx_l[valid_test_new_old_flag], label_l[valid_test_new_old_flag]
-train_data = train_src_l, train_dst_l, train_ts_l, train_e_idx_l, train_label_l
-val_data = val_src_l, val_dst_l, val_ts_l, val_e_idx_l, val_label_l
+  test_src_new_new_l, test_dst_new_new_l, test_ts_new_new_l, test_e_idx_new_new_l, test_label_new_new_l, test_src_e_new_new_l, test_tgt_e_new_new_l, test_src_start_new_new_l, test_tgt_start_new_new_l, test_src_ngh_n_new_new_l, test_tgt_ngh_n_new_new_l, test_tgt_post_n_new_new_l = src_l[valid_test_new_new_flag], dst_l[valid_test_new_new_flag], ts_l[valid_test_new_new_flag], e_idx_l[valid_test_new_new_flag], label_l[valid_test_new_new_flag], src_e_l[valid_test_new_new_flag], tgt_e_l[valid_test_new_new_flag], src_start_l[valid_test_new_new_flag], tgt_start_l[valid_test_new_new_flag], src_ngh_n_l[valid_test_new_new_flag], tgt_ngh_n_l[valid_test_new_new_flag], tgt_post_n_l[valid_test_new_new_flag]
+  test_src_new_old_l, test_dst_new_old_l, test_ts_new_old_l, test_e_idx_new_old_l, test_label_new_old_l, test_src_e_new_old_l, test_tgt_e_new_old_l, test_src_start_new_old_l, test_tgt_start_new_old_l, test_src_ngh_n_new_old_l, test_tgt_ngh_n_new_old_l, test_tgt_post_n_new_old_l = src_l[valid_test_new_old_flag], dst_l[valid_test_new_old_flag], ts_l[valid_test_new_old_flag], e_idx_l[valid_test_new_old_flag], label_l[valid_test_new_old_flag], src_e_l[valid_test_new_old_flag], tgt_e_l[valid_test_new_old_flag], src_start_l[valid_test_new_old_flag], tgt_start_l[valid_test_new_old_flag], src_ngh_n_l[valid_test_new_old_flag], tgt_ngh_n_l[valid_test_new_old_flag], tgt_post_n_l[valid_test_new_old_flag]
+train_data = train_src_l, train_dst_l, train_ts_l, train_e_idx_l, train_label_l, train_src_e_l, train_tgt_e_l, train_src_start_l, train_tgt_start_l, train_src_ngh_n_l, train_tgt_ngh_n_l, train_tgt_post_n_l
+val_data = val_src_l, val_dst_l, val_ts_l, val_e_idx_l, val_label_l, val_src_e_l, val_tgt_e_l, val_src_start_l, val_tgt_start_l, val_src_ngh_n_l, val_tgt_ngh_n_l, val_tgt_post_n_l
 train_val_data = (train_data, val_data)
 
 # ngh = {}
@@ -108,26 +117,11 @@ train_val_data = (train_data, val_data)
 # create two neighbor finders to handle graph extraction.
 # for transductive mode all phases use full_ngh_finder, for inductive node train/val phases use the partial one
 # while test phase still always uses the full one
-# YL: how to make ts aggregation transductive
-full_adj_list = [[] for _ in range(max_idx + 1)]
-for src, dst, eidx, ts in zip(src_l, dst_l, e_idx_l, ts_l):
-  full_adj_list[src].append((dst, eidx, ts))
-  full_adj_list[dst].append((src, eidx, ts))
-full_ngh_finder = NeighborFinder(full_adj_list, bias=args.bias, use_cache=NGH_CACHE, sample_method=args.pos_sample)
-partial_adj_list = [[] for _ in range(max_idx + 1)]
-for src, dst, eidx, ts in zip(train_src_l, train_dst_l, train_e_idx_l, train_ts_l):
-  partial_adj_list[src].append((dst, eidx, ts))
-  partial_adj_list[dst].append((src, eidx, ts))
-for src, dst, eidx, ts in zip(val_src_l, val_dst_l, val_e_idx_l, val_ts_l):
-  partial_adj_list[src].append((dst, eidx, ts))
-  partial_adj_list[dst].append((src, eidx, ts))
-partial_ngh_finder = NeighborFinder(partial_adj_list, bias=args.bias, use_cache=NGH_CACHE, sample_method=args.pos_sample)
-ngh_finders = partial_ngh_finder, full_ngh_finder
 
-# create random samplers to generate train/val/test instances
-train_rand_sampler = RandEdgeSampler((train_src_l, ), (train_dst_l, ))
-val_rand_sampler = RandEdgeSampler((train_src_l, val_src_l), (train_dst_l, val_dst_l))
-test_rand_sampler = RandEdgeSampler((train_src_l, val_src_l, test_src_l), (train_dst_l, val_dst_l, test_dst_l))
+# # create random samplers to generate train/val/test instances
+train_rand_sampler = RandEdgeSampler((train_src_l, ), (train_src_start_l, ), (train_src_ngh_n_l, ), (train_dst_l, ), (train_tgt_start_l, ), (train_tgt_ngh_n_l, ))
+val_rand_sampler = RandEdgeSampler((train_src_l, val_src_l), (train_src_start_l, val_src_start_l), (train_src_ngh_n_l, val_src_ngh_n_l), (train_dst_l, val_dst_l), (train_tgt_start_l, val_tgt_start_l), (train_tgt_ngh_n_l, val_tgt_ngh_n_l))
+test_rand_sampler = RandEdgeSampler((train_src_l, val_src_l, test_src_l), (train_src_start_l, val_src_start_l, test_src_start_l), (train_src_ngh_n_l, val_src_ngh_n_l, test_src_ngh_n_l), (train_dst_l, val_dst_l, test_dst_l), (train_tgt_start_l, val_tgt_start_l, test_tgt_start_l), (train_tgt_ngh_n_l, val_tgt_ngh_n_l, val_tgt_ngh_n_l))
 rand_samplers = train_rand_sampler, val_rand_sampler
 
 # multiprocessing memory setting
@@ -141,10 +135,8 @@ device = torch.device('cuda:{}'.format(GPU))
 #       n_head=ATTN_NUM_HEADS, drop_out=DROP_OUT, pos_dim=POS_DIM, pos_enc=POS_ENC,
 #       num_neighbors=NUM_NEIGHBORS, walk_n_head=WALK_N_HEAD, walk_mutual=WALK_MUTUAL, walk_linear_out=args.walk_linear_out,
 #       cpu_cores=CPU_CORES, verbosity=VERBOSITY, get_checkpoint_path=get_checkpoint_path)
-num_nodes = max_idx+1
-cawn = CAWN2(num_nodes, n_feat, e_feat, pos_dim=POS_DIM, n_head=ATTN_NUM_HEADS, num_neighbors=NUM_NEIGHBORS, dropout=DROP_OUT, walk_linear_out=args.walk_linear_out, get_checkpoint_path=get_checkpoint_path)
+cawn = CAWN2(n_feat, e_feat, pos_dim=POS_DIM, n_head=ATTN_NUM_HEADS, num_neighbors=NUM_NEIGHBORS, dropout=DROP_OUT, walk_linear_out=args.walk_linear_out, get_checkpoint_path=get_checkpoint_path)
 cawn.to(device)
-neighborhood_store = []
 feat_dim = n_feat.shape[1]
 e_feat_dim = e_feat.shape[1]
 time_dim = n_feat.shape[1]
@@ -152,7 +144,9 @@ model_dim = feat_dim + e_feat_dim + time_dim
 # neighborhood_store.append(torch.sparse_coo_tensor(size=(num_nodes, num_nodes, model_dim),requires_grad=False).to(device)) # sparse tensor (node_idx, neighbor_idx, encoded_features)
 # neighborhood_store.append(torch.sparse_coo_tensor(size=(num_nodes, num_nodes, model_dim),requires_grad=False).to(device))
 # neighborhood_store = torch.sparse_coo_tensor([[0], [0]], torch.zeros(1, 2, model_dim), (num_nodes, num_nodes, 2, model_dim)).to(device)
-neighborhood_store = {}
+# neighborhood_store = {}
+neighborhood_store = torch.zeros(max_e_idx, e_feat_dim + time_dim + 3).to(device)
+cawn.set_device(device)
 cawn.update_neighborhood_encoder(neighborhood_store)
 optimizer = torch.optim.Adam(cawn.parameters(), lr=LEARNING_RATE)
 criterion = torch.nn.BCELoss()
@@ -162,18 +156,18 @@ early_stopper = EarlyStopMonitor(tolerance=TOLERANCE)
 # train_val(train_val_data, cawn, args.mode, BATCH_SIZE, NUM_EPOCH, criterion, optimizer, early_stopper, ngh_finders, rand_samplers, logger)
 
 #YL optimized sampler
-train_val(train_val_data, cawn, args.mode, BATCH_SIZE, NUM_EPOCH, criterion, optimizer, early_stopper, ngh_finders, rand_samplers, logger, model_dim, num_nodes)
+train_val(train_val_data, cawn, args.mode, BATCH_SIZE, NUM_EPOCH, criterion, optimizer, early_stopper, rand_samplers, logger, model_dim)
 
 # final testing
 # cawn.update_ngh_finder(full_ngh_finder)  # remember that testing phase should always use the full neighbor finder
 print("_*"*50)
-test_acc, test_ap, test_f1, test_auc = eval_one_epoch('test for {} nodes'.format(args.mode), cawn, test_rand_sampler, test_src_l, test_dst_l, test_ts_l, test_label_l, test_e_idx_l)
+test_acc, test_ap, test_f1, test_auc = eval_one_epoch('test for {} nodes'.format(args.mode), cawn, test_rand_sampler, test_src_l, test_dst_l, test_ts_l, test_label_l, test_e_idx_l, test_src_e_l, test_tgt_e_l, test_src_start_l, test_tgt_start_l, test_src_ngh_n_l, test_tgt_ngh_n_l, test_tgt_post_n_l)
 logger.info('Test statistics: {} all nodes -- acc: {}, auc: {}, ap: {}'.format(args.mode, test_acc, test_auc, test_ap))
 test_new_new_acc, test_new_new_ap, test_new_new_auc, test_new_old_acc, test_new_old_ap, test_new_old_auc = [-1]*6
 if args.mode == 'i':
-  test_new_new_acc, test_new_new_ap, test_new_new_f1, test_new_new_auc = eval_one_epoch('test for {} nodes'.format(args.mode), cawn, test_rand_sampler, test_src_new_new_l, test_dst_new_new_l, test_ts_new_new_l, test_label_new_new_l, test_e_idx_new_new_l)
+  test_new_new_acc, test_new_new_ap, test_new_new_f1, test_new_new_auc = eval_one_epoch('test for {} nodes'.format(args.mode), cawn, test_rand_sampler, test_src_new_new_l, test_dst_new_new_l, test_ts_new_new_l, test_label_new_new_l, test_e_idx_new_new_l, test_src_e_new_new_l, test_tgt_e_new_new_l, test_src_start_new_new_l, test_tgt_start_new_new_l, test_src_ngh_n_new_new_l, test_tgt_ngh_n_new_new_l, test_tgt_post_n_new_new_l)
   logger.info('Test statistics: {} new-new nodes -- acc: {}, auc: {}, ap: {}'.format(args.mode, test_new_new_acc, test_new_new_ap, test_new_new_auc ))
-  test_new_old_acc, test_new_old_ap, test_new_old_f1, test_new_old_auc = eval_one_epoch('test for {} nodes'.format(args.mode), cawn, test_rand_sampler, test_src_new_old_l, test_dst_new_old_l, test_ts_new_old_l, test_label_new_old_l, test_e_idx_new_old_l)
+  test_new_old_acc, test_new_old_ap, test_new_old_f1, test_new_old_auc = eval_one_epoch('test for {} nodes'.format(args.mode), cawn, test_rand_sampler, test_src_new_old_l, test_dst_new_old_l, test_ts_new_old_l, test_label_new_old_l, test_e_idx_new_old_l, test_src_e_new_old_l, test_tgt_e_new_old_l, test_src_start_new_old_l, test_tgt_start_new_old_l, test_src_ngh_n_new_old_l, test_tgt_ngh_n_new_old_l, test_tgt_post_n_new_old_l)
   logger.info('Test statistics: {} new-old nodes -- acc: {}, auc: {}, ap: {}'.format(args.mode, test_new_old_acc, test_new_old_ap, test_new_old_auc))
 
 # save model
