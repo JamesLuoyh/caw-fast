@@ -25,6 +25,7 @@ def get_args():
   parser.add_argument('--walk_n_head', type=int, default=8, help="number of heads to use for walk attention")
   parser.add_argument('--walk_mutual', action='store_true', help="whether to do mutual query for source and target node random walks")
   parser.add_argument('--walk_linear_out', action='store_true', default=False, help="whether to linearly project each node's ")
+  parser.add_argument('--t_batch', action='store_true', default=False, help="whether to use t-batch for training")
 
   parser.add_argument('--attn_agg_method', type=str, default='attn', choices=['attn', 'lstm', 'mean'], help='local aggregation method, we only use the default here')
   parser.add_argument('--attn_mode', type=str, default='prod', choices=['prod', 'map'],

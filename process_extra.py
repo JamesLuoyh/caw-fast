@@ -61,6 +61,8 @@ def preprocess(data_name):
                          'ts':ts_list, 
                          'label':label_list, 
                          'idx':idx_list,
+                         'src': u_list,
+                         'tgt': i_list,
                          'e_from_u': e_from_u,
                          'e_from_i': e_from_i,
                          'u_start': u_start,
