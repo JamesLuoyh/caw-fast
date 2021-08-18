@@ -132,7 +132,7 @@ device = torch.device('cuda:{}'.format(GPU))
 #       n_head=ATTN_NUM_HEADS, drop_out=DROP_OUT, pos_dim=POS_DIM, pos_enc=POS_ENC,
 #       num_neighbors=NUM_NEIGHBORS, walk_n_head=WALK_N_HEAD, walk_mutual=WALK_MUTUAL, walk_linear_out=args.walk_linear_out,
 #       cpu_cores=CPU_CORES, verbosity=VERBOSITY, get_checkpoint_path=get_checkpoint_path)
-cawn = CAWN2(n_feat, e_feat, pos_dim=POS_DIM, n_head=ATTN_NUM_HEADS, num_neighbors=NUM_NEIGHBORS, dropout=DROP_OUT, walk_linear_out=args.walk_linear_out, get_checkpoint_path=get_checkpoint_path, get_ngh_store_path=get_ngh_store_path)
+cawn = CAWN2(n_feat, e_feat, pos_dim=POS_DIM, n_head=ATTN_NUM_HEADS, num_neighbors=NUM_NEIGHBORS, dropout=DROP_OUT, walk_linear_out=args.walk_linear_out, get_checkpoint_path=get_checkpoint_path, get_ngh_store_path=get_ngh_store_path, verbosity=VERBOSITY)
 cawn.to(device)
 feat_dim = n_feat.shape[1]
 e_feat_dim = e_feat.shape[1]
@@ -142,7 +142,7 @@ model_dim = feat_dim + e_feat_dim + time_dim
 # neighborhood_store.append(torch.sparse_coo_tensor(size=(num_nodes, num_nodes, model_dim),requires_grad=False).to(device))
 # neighborhood_store = torch.sparse_coo_tensor([[0], [0]], torch.zeros(1, 2, model_dim), (num_nodes, num_nodes, 2, model_dim)).to(device)
 # neighborhood_store = {}
-neighborhood_store = torch.zeros(max_e_idx, e_feat_dim + time_dim + 3).to(device)
+neighborhood_store = torch.zeros(max_e_idx, e_feat_dim + time_dim + 3, device=device)
 cawn.set_device(device)
 cawn.set_neighborhood_store(neighborhood_store)
 optimizer = torch.optim.Adam(cawn.parameters(), lr=LEARNING_RATE)
