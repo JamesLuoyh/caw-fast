@@ -37,6 +37,7 @@ VERBOSITY = args.verbosity
 AGG = args.agg
 SEED = args.seed
 T_BATCH = args.t_batch
+T_BATCH_ORDER = args.t_batch_order
 assert(CPU_CORES >= -1)
 set_random_seed(SEED)
 logger, get_checkpoint_path, get_ngh_store_path, best_model_path, best_model_ngh_store_path = set_up_logger(args, sys_argv)
@@ -45,8 +46,10 @@ logger, get_checkpoint_path, get_ngh_store_path, best_model_path, best_model_ngh
 if T_BATCH:
   g_df = pd.read_csv('./processed/batches_{}.txt'.format(DATA))
   tbatch_id_l = g_df.tbatch_id.values
-else:
+elif T_BATCH_ORDER:
   g_df = pd.read_csv('./processed/batches_{}.txt'.format(DATA))
+else:
+  g_df = pd.read_csv('./processed/ml2_{}.csv'.format(DATA))
   tbatch_id_l = None
 e_feat = np.load('./processed/ml_{}.npy'.format(DATA))
 n_feat = np.load('./processed/ml_{}_node.npy'.format(DATA))

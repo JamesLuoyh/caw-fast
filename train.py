@@ -58,7 +58,7 @@ def train_val(train_val_data, model, mode, bs, epochs, criterion, optimizer, ear
       label_l_cut = train_label_l[batch_idx]  # currently useless since we are not predicting edge labels
       src_e_l, tgt_e_l, src_start_l, tgt_start_l, src_ngh_n_l, tgt_ngh_n_l = train_src_e_l[batch_idx], train_tgt_e_l[batch_idx], train_src_start_l[batch_idx], train_tgt_start_l[batch_idx], train_src_ngh_n_l[batch_idx], train_tgt_ngh_n_l[batch_idx]
       size = len(src_l_cut)
-      bad_idx = np.random.randint(0, e_idx, size)
+      # bad_idx = np.random.randint(0, e_idx, size)
       # bad_l_cut, bad_start_l, bad_ngh_n_l = train_tgt_l[bad_idx], train_tgt_start_l[bad_idx], np.array([train_tgt_post_n_l[b] if b < s_idx else train_tgt_ngh_n_l[b] for b in bad_idx])
       _, _, _, bad_l_cut, bad_start_l, bad_ngh_n_l = train_rand_sampler.sample(size)
 

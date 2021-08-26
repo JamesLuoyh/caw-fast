@@ -2,14 +2,16 @@ import argparse
 import pandas as pd
 from tqdm import tqdm
 import sys
+import random
 
-def preprocess(data_name):
+def preprocess(data_name, max_nghs, seed):
     u_list, i_list, ts_list, label_list, e_from_u, e_from_i, u_start, i_start = [], [], [], [], [], [], [], []
     idx_list = []
     neighbors = {}
     u_ngh_n = []
     i_ngh_n = []
     i_post_n = []
+    max_nghs_and_self = max_nghs + 1
     with open(data_name) as f:
         s = next(f)
         print(s)
@@ -21,13 +23,13 @@ def preprocess(data_name):
                 neighbors[u] = [u]
             if i not in neighbors:
                 neighbors[i] = [i]
-            u_ngh_n.append(len(neighbors[u]))
-            i_ngh_n.append(len(neighbors[i]))
+            u_ngh_n.append(min(len(neighbors[u]), max_nghs_and_self))
+            i_ngh_n.append(min(len(neighbors[i]), max_nghs_and_self))
             if i not in neighbors[u]:
                 neighbors[u].append(i)
             if u not in neighbors[i]:
                 neighbors[i].append(u)
-            i_post_n.append(len(neighbors[i]))
+            i_post_n.append(min(len(neighbors[i]), max_nghs_and_self))
             ts = float(e[3])
             label = int(e[4])
                         
@@ -43,7 +45,7 @@ def preprocess(data_name):
     for i in range(max_idx + 1):
         if i in neighbors:
             start_idx[i] = curr_idx
-            curr_idx += len(neighbors[i])
+            curr_idx += min(len(neighbors[i]), max_nghs_and_self)
 
 
     for idx in range(len(u_list)):
@@ -53,8 +55,15 @@ def preprocess(data_name):
         i_idx = start_idx[i]
         u_start.append(u_idx)
         i_start.append(i_idx)
-        e_from_u.append(u_idx + neighbors[u].index(i))
-        e_from_i.append(i_idx + neighbors[i].index(u))
+        i_in_u = neighbors[u].index(i)
+        if i_in_u >= max_nghs_and_self:
+            i_in_u = (hash(i_in_u) ^ seed) % max_nghs + 1
+        u_in_i = neighbors[i].index(u)
+        if u_in_i >= max_nghs_and_self:
+            u_in_i = (hash(u_in_i) ^ seed) % max_nghs + 1
+        i_in_u = neighbors[u].index(i)
+        e_from_u.append(u_idx + i_in_u)
+        e_from_i.append(i_idx + u_in_i)
 
     return pd.DataFrame({'u': u_list, 
                          'i':i_list, 
@@ -77,13 +86,15 @@ def run(args):
     PATH = './processed/ml_{}.csv'.format(data_name)
     OUT_DF = './processed/ml2_{}.csv'.format(data_name)
     print('preprocess {} dataset ...'.format(data_name))
-    out = preprocess(PATH)
+    out = preprocess(PATH, args.max_neighbors, args.seed)
 
     out.to_csv(OUT_DF)
 
 parser = argparse.ArgumentParser('Interface for second round of propressing csv source data for CATAW framework')
 parser.add_argument('--dataset', choices = ['wikipedia', 'reddit', 'socialevolve', 'uci', 'enron', 'socialevolve_1month', 'socialevolve_2weeks'], 
                    help='specify one dataset to preprocess')
+parser.add_argument('--max_neighbors', type=int, default=32, help='number of neighbors to store per node')
+parser.add_argument('--seed', type=int, default=1, help='seed for randomization of neighborhood store index')
 
 try:
     args = parser.parse_args()
