@@ -45,7 +45,7 @@ def set_up_logger(args, sys_argv):
   logger.info('Create best model directory {}'.format(best_model_dir))
 
   get_checkpoint_path = lambda epoch: (checkpoint_dir + 'checkpoint-epoch-{}.pth'.format(epoch))
-  get_ngh_store_path = lambda epoch: (checkpoint_dir + 'ngh-store-epoch-{}.pth'.format(epoch))
+  get_ngh_store_path = lambda epoch, layer: (checkpoint_dir + 'ngh-store-epoch-{}-layer-{}.pth'.format(epoch, layer))
   best_model_path = best_model_dir + 'best-model.pth'
   best_model_ngh_store_path = best_model_dir + 'best-model-ngh_store.pth'
 

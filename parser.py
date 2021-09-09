@@ -27,8 +27,10 @@ def get_args():
   parser.add_argument('--walk_linear_out', action='store_true', default=False, help="whether to linearly project each node's ")
   parser.add_argument('--t_batch', action='store_true', default=False, help="whether to use t-batch for training")
   parser.add_argument('--t_batch_order', action='store_true', default=False, help="whether to use t-batch for ordering examples without changing batch size")
+  parser.add_argument('--agg_time_delta', action='store_true', default=False, help="whether to use t-batch for ordering examples without changing batch size")
 
   parser.add_argument('--attn_agg_method', type=str, default='attn', choices=['attn', 'lstm', 'mean'], help='local aggregation method, we only use the default here')
+  parser.add_argument('--history_agg_method', type=str, default='gru', choices=['lstm', 'gru'], help='local aggregation method, we only use the default here')
   parser.add_argument('--attn_mode', type=str, default='prod', choices=['prod', 'map'],
             help='use dot product attention or mapping based, we only use the default here')
   parser.add_argument('--attn_n_head', type=int, default=2, help='number of heads used in tree-shaped attention layer, we only use the default here')
@@ -36,6 +38,7 @@ def get_args():
 
   # general training hyper-parameters
   parser.add_argument('--n_epoch', type=int, default=50, help='number of epochs')
+  parser.add_argument('--backprop_n_history', type=int, default=1, help='number of items in history for the memory state to backprop for each iteration')
   parser.add_argument('--bs', type=int, default=64, help='batch_size')
   parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
   parser.add_argument('--drop_out', type=float, default=0.1, help='dropout probability for all dropout layers')

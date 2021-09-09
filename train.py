@@ -11,7 +11,7 @@ logging.getLogger('matplotlib.font_manager').disabled = True
 logging.getLogger('matplotlib.ticker').disabled = True
 
 
-def train_val(train_val_data, model, mode, bs, epochs, criterion, optimizer, early_stopper, rand_samplers, logger, model_dim, t_batch=None):
+def train_val(train_val_data, model, mode, bs, epochs, criterion, optimizer, early_stopper, rand_samplers, logger, model_dim, n_layer=2, t_batch=None):
   # unpack the data, prepare for the training
   train_data, val_data = train_val_data
   train_src_l, train_tgt_l, train_ts_l, train_e_idx_l, train_label_l, train_src_e_l, train_tgt_e_l, train_src_start_l, train_tgt_start_l, train_src_ngh_n_l, train_tgt_ngh_n_l, train_tgt_post_n_l = train_data
@@ -108,13 +108,17 @@ def train_val(train_val_data, model, mode, bs, epochs, criterion, optimizer, ear
       logger.info(f'Loading the best model at epoch {early_stopper.best_epoch}')
       best_checkpoint_path = model.get_checkpoint_path(early_stopper.best_epoch)
       model.load_state_dict(torch.load(best_checkpoint_path))
-      best_ngh_store_path = model.get_ngh_store_path(early_stopper.best_epoch)
-      model.set_neighborhood_store(torch.load(best_ngh_store_path))
+      best_ngh_store = []
+      for i in range(n_layer):
+        best_ngh_store_path = model.get_ngh_store_path(early_stopper.best_epoch, i)
+        best_ngh_store.append(torch.load(best_ngh_store_path))
+      model.set_neighborhood_store(best_ngh_store)
       logger.info(f'Loaded the best model at epoch {early_stopper.best_epoch} for inference')
       model.eval()
       break
     else:
-      torch.save(model.neighborhood_store, model.get_ngh_store_path(epoch))
+      for i in range(n_layer):
+        torch.save(model.neighborhood_store[i], model.get_ngh_store_path(epoch, i))
       torch.save(model.state_dict(), model.get_checkpoint_path(epoch))
     model.reset_store()
 

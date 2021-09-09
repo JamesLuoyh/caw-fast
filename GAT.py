@@ -98,10 +98,10 @@ class GATLayer(torch.nn.Module):
         else:
             self.register_parameter('bias', None)
 
-        if add_skip_connection:
-            self.skip_proj = nn.Linear(num_in_features, num_of_heads * num_out_features, bias=False)
-        else:
-            self.register_parameter('skip_proj', None)
+        # if add_skip_connection:
+        self.skip_proj = nn.Linear(num_in_features, num_of_heads * num_out_features, bias=False)
+        # else:
+        #     self.register_parameter('skip_proj', None)
 
         #
         # End of trainable weights
@@ -191,7 +191,7 @@ class GATLayerImp3(GATLayer):
         # Step 1: Linear Projection + regularization
         #
 
-        in_nodes_features, edge_index, num_of_nodes = data  # unpack data
+        in_nodes_features, self_nodes_features, edge_index, num_of_nodes = data  # unpack data
         # num_of_nodes = in_nodes_features.shape[self.nodes_dim]
         
         assert edge_index.shape[0] == 2, f'Expected edge index with shape=(2,E) got {edge_index.shape}'
@@ -199,17 +199,22 @@ class GATLayerImp3(GATLayer):
         # We apply the dropout to all of the input node features (as mentioned in the paper)
         # Note: for Cora features are already super sparse so it's questionable how much this actually helps
         in_nodes_features = self.dropout(in_nodes_features)
+        self_nodes_features = self.dropout(self_nodes_features)
 
         # shape = (N, FIN) * (FIN, NH*FOUT) -> (N, NH, FOUT) where NH - number of heads, FOUT - num of output features
         # We project the input node features into NH independent output features (one for each attention head)
         nodes_features_proj = self.linear_proj(in_nodes_features).view(-1, self.num_of_heads, self.num_out_features)
+        self_nodes_features_proj = self.linear_proj(self_nodes_features).view(-1, self.num_of_heads, self.num_out_features)
 
         nodes_features_proj = self.dropout(nodes_features_proj)  # in the official GAT imp they did dropout here as well
+        self_nodes_features_proj = self.dropout(self_nodes_features_proj)  # in the official GAT imp they did dropout here as well
 
         #
         # Step 2: Edge attention calculation
         #
 
+        # nodes_features_proj = nodes_features_proj * self_nodes_features_proj
+        # score = (nodes_features_proj * self_nodes_features_proj).sum(dim=-1)
         # Apply the scoring function (* represents element-wise (a.k.a. Hadamard) product)
         # shape = (N, NH, FOUT) * (1, NH, FOUT) -> (N, NH, 1) -> (N, NH) because sum squeezes the last dimension
         # Optimization note: torch.sum() is as performant as .sum() in my experiments
@@ -222,7 +227,9 @@ class GATLayerImp3(GATLayer):
         # scores shape = (E, NH), nodes_features_proj_lifted shape = (E, NH, FOUT), E - number of edges in the graph
         # scores_source_lifted, scores_target_lifted, nodes_features_proj_lifted = self.lift(scores_source, scores_target, nodes_features_proj, edge_index)
         scores_source_lifted, scores_target_lifted, nodes_features_proj_lifted = scores_source, scores_target, nodes_features_proj
+        # source_lifted, nodes_features_proj_lifted = score, nodes_features_proj
         scores_per_edge = self.leakyReLU(scores_source_lifted + scores_target_lifted)
+        # scores_per_edge = self.leakyReLU(source_lifted)
 
         # shape = (E, NH, 1)
         attentions_per_edge = self.neighborhood_aware_softmax(scores_per_edge, edge_index[self.trg_nodes_dim], num_of_nodes)
@@ -237,6 +244,9 @@ class GATLayerImp3(GATLayer):
         # shape = (E, NH, FOUT) * (E, NH, 1) -> (E, NH, FOUT), 1 gets broadcast into FOUT
         nodes_features_proj_lifted_weighted = nodes_features_proj_lifted * attentions_per_edge
 
+        # skip connection
+        # nodes_features_proj_lifted_weighted += self.skip_proj(in_nodes_features).view(-1, self.num_of_heads, self.num_out_features)
+
         # This part sums up weighted and projected neighborhood feature vectors for every target node
         # shape = (N, NH, FOUT)
         out_nodes_features = self.aggregate_neighbors(nodes_features_proj_lifted_weighted, edge_index, in_nodes_features, num_of_nodes)
@@ -244,7 +254,6 @@ class GATLayerImp3(GATLayer):
         #
         # Step 4: Residual/skip connections, concat and bias
         #
-
         out_nodes_features = self.skip_concat_bias(attentions_per_edge, in_nodes_features, out_nodes_features)
         return (out_nodes_features, edge_index)
 
