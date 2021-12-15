@@ -6,7 +6,7 @@ from sklearn.metrics import f1_score
 from sklearn.metrics import roc_auc_score
 
 
-def eval_one_epoch(hint, tgan, sampler, src, tgt, ts, label, e_id, src_e, tgt_e, src_start, tgt_start, src_ngh_n, tgt_ngh_n, tgt_post_n, tb=None):
+def eval_one_epoch(hint, tgan, sampler, src, tgt, ts, label, e_id, src_e, tgt_e, src_start, tgt_start, src_ngh_n, tgt_ngh_n, tb=None):
   val_acc, val_ap, val_f1, val_auc = [], [], [], []
   with torch.no_grad():
     tgan = tgan.eval()

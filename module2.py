@@ -10,7 +10,7 @@ from torch.utils.data import WeightedRandomSampler
 class CAWN2(torch.nn.Module):
   def __init__(self, n_feat, e_feat, memory_dim, total_nodes, pos_dim=0, n_head=4, num_neighbors=['32'], history_agg_method='gru',
       dropout=0.1, walk_linear_out=False, get_checkpoint_path=None, get_ngh_store_path=None, verbosity=1, seed=1, agg_time_delta=False,
-      backprop_n_history=1):
+      backprop_n_history=1, n_layers=1):
     super(CAWN2, self).__init__()
     self.logger = logging.getLogger(__name__)
     self.dropout = dropout
@@ -32,7 +32,7 @@ class CAWN2(torch.nn.Module):
       self.e_feat_dim *= 2
       self.time_dim *= 2
     self.pos_dim = pos_dim
-    self.trainable_embedding = nn.Embedding(num_embeddings=36, embedding_dim=self.pos_dim) # position embedding
+    self.trainable_embedding = nn.Embedding(num_embeddings=30, embedding_dim=self.pos_dim) # position embedding
    
     # final projection layer
     self.walk_linear_out = walk_linear_out
@@ -42,6 +42,7 @@ class CAWN2(torch.nn.Module):
     self.src_idx_l_prev = self.tgt_idx_l_prev = self.cut_time_l_prev = self.e_idx_l_prev = None
     self.prev_raw_data = {}
     self.num_neighbors = num_neighbors
+    self.n_layers = n_layers
     self.ngh_id_idx = 0
     self.e_raw_idx = 1
     self.ts_raw_idx = 2
@@ -64,30 +65,38 @@ class CAWN2(torch.nn.Module):
     self.memory_dim = memory_dim
     self.verbosity = verbosity
     self.caw_dim = self.hidden_dim + 1
-    if len(self.num_neighbors) > 1:
+    if self.n_layers > 1:
       self.attn_dim = 2*self.feat_dim + 3 * (self.hidden_dim) + 2 * self.pos_dim
     else:
       self.attn_dim = self.feat_dim + 2 * (self.hidden_dim) + 1 * self.pos_dim
     # self.attn_m = AttnModel(self.feat_dim, 0, self.attn_dim, n_head=n_head, drop_out=dropout)
     self.gat = GAT(1, [n_head], [self.attn_dim, self.feat_dim], add_skip_connection=False, bias=True,
                  dropout=dropout, log_attention_weights=False)
-    self.seed = seed
     self.total_nodes = total_nodes
 
-  def reset_raw_data(self):
-    self.prev_raw_data = {}
+  def set_seed(self, seed):
+    self.seed = seed
+
+  def clear_store(self):
+    self.neighborhood_store = None
 
   def reset_store(self):
     [n.zero_() for n in self.neighborhood_store]
-      
-    hidden_store = torch.empty(len(self.neighborhood_store[0]), self.hidden_dim, device=self.device)
+    ngh_l1 = len(self.neighborhood_store[0])
+    self.neighborhood_store[0] = None
     num_raw = 3
     if self.backprop_n_history > 1:
       num_raw += 2
-    self.neighborhood_store[0][:, num_raw:] = nn.init.xavier_uniform_(hidden_store)
-    if len(self.num_neighbors) > 1:
-      hidden_store = torch.empty(len(self.neighborhood_store[1]), self.hidden_dim, device=self.device) # plus 1 for storing parent id
-      self.neighborhood_store[1][:, num_raw:-1] = nn.init.xavier_uniform_(hidden_store)
+    raw_store = torch.zeros(ngh_l1, num_raw)
+    hidden_store = torch.empty(ngh_l1, self.hidden_dim)
+    self.neighborhood_store[0] = torch.cat((raw_store, nn.init.xavier_uniform_(hidden_store)), -1).to(self.device)
+    if self.n_layers > 1:
+      ngh_l2 = len(self.neighborhood_store[1])
+      self.neighborhood_store[1] = None
+      raw_store = torch.zeros(ngh_l2, num_raw)
+      hidden_store = torch.empty(ngh_l2, self.hidden_dim) # plus 1 for storing parent id
+      parent_store = torch.empty(ngh_l2, 1)
+      self.neighborhood_store[1] = torch.cat((raw_store, nn.init.xavier_uniform_(hidden_store), parent_store), -1).to(self.device)
     self.num_neighbors_stored = torch.ones_like(self.num_neighbors_stored)
   
   def get_neighborhood_store(self):
@@ -115,15 +124,7 @@ class CAWN2(torch.nn.Module):
     src_l_cut, src_e_l, src_start_l, src_ngh_n_l = src_l
     tgt_l_cut, tgt_e_l, tgt_start_l, tgt_ngh_n_l = tgt_l
     bad_l_cut, bad_e_l, bad_start_l, bad_ngh_n_l = bad_l
-    # src_start_l = self.start_idx[src_l_cut].cpu().numpy()
-    # tgt_start_l = self.start_idx[tgt_l_cut].cpu().numpy()
-    # bad_start_l = self.start_idx[bad_l_cut].cpu().numpy()
-    # src_ngh_n_l = self.num_neighbors_stored[src_l_cut].cpu().numpy()
-    # # print("*"*60)
-    # # print(self.num_neighbors_stored[src_l_cut].cpu().numpy())
-    # # print(src_ngh_n_l)
-    # tgt_ngh_n_l = self.num_neighbors_stored[tgt_l_cut].cpu().numpy()
-    # bad_ngh_n_l = self.num_neighbors_stored[bad_l_cut].cpu().numpy()
+
     batch_size = len(src_l_cut)
     start_l = np.concatenate((src_start_l, tgt_start_l, bad_start_l), 0)
     ngh_n_l = np.concatenate((src_ngh_n_l, tgt_ngh_n_l, bad_ngh_n_l), 0)
@@ -136,16 +137,13 @@ class CAWN2(torch.nn.Module):
     src_ngh_n_th = torch.from_numpy(src_ngh_n_l).to(dtype=torch.long, device=device)
     tgt_ngh_n_th = torch.from_numpy(tgt_ngh_n_l).to(dtype=torch.long, device=device)
     bad_ngh_n_th = torch.from_numpy(bad_ngh_n_l).to(dtype=torch.long, device=device)
-    # src_ngh_n_th = torch.clamp(src_ngh_n_th, min=1, max=self.nngh)
-    # tgt_ngh_n_th = torch.clamp(tgt_ngh_n_th, min=1, max=self.nngh)
-    # bad_ngh_n_th = torch.clamp(bad_ngh_n_th, min=1, max=self.nngh)
     src_nghs = torch.sum(src_ngh_n_th)
     tgt_nghs = torch.sum(tgt_ngh_n_th)
     bad_nghs = torch.sum(bad_ngh_n_th)
     start_th = torch.cat((src_start_th, tgt_start_th, bad_start_th), 0)
     ngh_n_th = torch.cat((src_ngh_n_th, tgt_ngh_n_th, bad_ngh_n_th), 0)
     idx_th = torch.cat((src_th, tgt_th, bad_th), 0)
-    if len(self.num_neighbors) > 1:
+    if self.n_layers > 1:
       num_ngh_l2 = self.num_neighbors[1] * batch_size
 
     cut_time_th = torch.from_numpy(cut_time_l).to(dtype=torch.float, device=device)
@@ -180,22 +178,22 @@ class CAWN2(torch.nn.Module):
 
     ngh_id = updated_mem[:, self.ngh_id_idx].long()
     src_msk = torch.cat((torch.zeros(src_nghs, device = device), torch.ones(tgt_nghs + bad_nghs, device = device)), 0)
-    pos_raw = (ngh_id != 0) * (((ngh_id != ori_idx).long() + 1) * (4)) #src_msk + 
+    pos_raw = (ngh_id != 0) * ((ngh_id != ori_idx).long() + 2) #src_msk + 
     # pos_encoding = self.trainable_embedding(pos_raw.long())
     node_features = self.node_raw_embed(ngh_id)
-    if len(self.num_neighbors) > 1:
+    if self.n_layers > 1:
       updated_mem_l2 = self.get_updated_memory_l2(idx_th, cut_time_th.repeat(3), device)
       ngh_id_l2 = updated_mem_l2[:, self.ngh_id_idx].long()
       node_features_l2 = self.node_raw_embed(ngh_id_l2)
       parent_id_l2 = updated_mem_l2[:, self.parent_idx].long()
       parent_node_feat_l2 = self.node_raw_embed(parent_id_l2)
       src_msk = torch.cat((torch.zeros(num_ngh_l2, device = device), torch.ones(2 * num_ngh_l2, device = device)), 0) # 4, 8, 5,10
-      pos_raw_l2 = (ngh_id_l2 != 0) * (ngh_id_l2 != idx_th.repeat_interleave(self.num_neighbors[1])).long() * (17) # + src_msk) # 17 18
+      pos_raw_l2 = (ngh_id_l2 != 0) * (ngh_id_l2 != idx_th.repeat_interleave(self.num_neighbors[1])).long() * (7) # + src_msk) # 17 18
       src_n_f_l2 = node_features_l2[0:num_ngh_l2]
       tgt_n_f_l2 = node_features_l2[num_ngh_l2:2 * num_ngh_l2]
       bad_n_f_l2 = node_features_l2[2 * num_ngh_l2:]
 
-    # pos_encoding_l2 = self.trainable_embedding(pos_raw_l2.long())
+      # pos_encoding_l2 = self.trainable_embedding(pos_raw_l2.long())
     # node_features *= (ngh_id != 0).repeat(self.feat_dim, 1).T
     end = time.time()
     self.log_time('retrieve memory', start, end)
@@ -204,16 +202,6 @@ class CAWN2(torch.nn.Module):
     src_n_f = node_features[0:src_nghs]
     tgt_n_f = node_features[src_nghs:src_nghs+tgt_nghs]
     bad_n_f = node_features[src_nghs+tgt_nghs:]
-
-    # src_e_f = e_hidden_state[0:src_nghs]
-    # tgt_e_f = e_hidden_state[src_nghs:src_nghs + tgt_nghs]
-    # bad_e_f = e_hidden_state[src_nghs + tgt_nghs:]
-    # src_ts_f = time_hidden_state[0:src_nghs]
-    # tgt_ts_f = time_hidden_state[src_nghs:src_nghs + tgt_nghs]
-    # bad_ts_f = time_hidden_state[src_nghs + tgt_nghs:]
-    # src_ts_diff_f = time_diff_hidden_state[0:src_nghs]
-    # tgt_ts_diff_f = time_diff_hidden_state[src_nghs:src_nghs + tgt_nghs]
-    # bad_ts_diff_f = time_diff_hidden_state[src_nghs + tgt_nghs:]
     
     if self.agg_time_delta:
       hidden_states = updated_mem[:, self.e_emb_idx[0]: self.ts_diff_emb_idx[1]]
@@ -244,7 +232,7 @@ class CAWN2(torch.nn.Module):
       pos_encoding = self.trainable_embedding(pos_raw.long())
       caw = torch.cat((caw[:, :-1], pos_encoding), -1)
     # 2nd hop neighbors
-    if len(self.num_neighbors) > 1:
+    if self.n_layers > 1:
       sparse_idx_l2 = torch.arange(num_ngh_l2 * 2, device=device)
       if self.agg_time_delta:
         hidden_states_l2 = updated_mem_l2[:, self.e_emb_idx[0]: self.ts_diff_emb_idx[1]]
@@ -256,14 +244,17 @@ class CAWN2(torch.nn.Module):
       bad_hidden_l2 = hidden_states_l2[-num_ngh_l2:]
       caw_l2 = self.get_relative_id(sparse_idx_l2, sparse_idx_l2, ngh_id_l2[:num_ngh_l2].repeat(2), ngh_id_l2[num_ngh_l2:], src_hidden_l2.repeat(2, 1), torch.cat((tgt_hidden_l2, bad_hidden_l2), 0))
       pos_raw = caw_l2[:, -1]
+
       pos_encoding = self.trainable_embedding(pos_raw.long())
       caw_l2 = torch.cat((caw_l2[:, :-1], pos_encoding), -1)
       caw_l1l2 = self.get_relative_id(torch.cat((src_sparse_idx, src_n_sparse_idx), 0), sparse_idx_l2, src_ngh_id.repeat(2), ngh_id_l2[num_ngh_l2:], src_prev_f.repeat(2, 1), torch.cat((tgt_hidden_l2, bad_hidden_l2), 0))
       pos_raw = caw_l1l2[:, -1]
+
       pos_encoding = self.trainable_embedding(pos_raw.long())
       caw_l1l2 = torch.cat((caw_l1l2[:, :-1], pos_encoding), -1)
       caw_l2l1 = self.get_relative_id(sparse_idx_l2, tgt_bad_sparse_idx, ngh_id_l2[:num_ngh_l2].repeat(2), torch.cat((tgt_ngh_id, bad_ngh_id), 0), src_hidden_l2.repeat(2, 1), torch.cat((tgt_prev_f, bad_prev_f), 0))
       pos_raw = caw_l2l1[:, -1]
+
       pos_encoding = self.trainable_embedding(pos_raw.long())
       caw_l2l1 = torch.cat((caw_l2l1[:, :-1], pos_encoding), -1)
     end = time.time()
@@ -273,7 +264,7 @@ class CAWN2(torch.nn.Module):
     src_caw_n = caw[src_nghs:2*src_nghs]
     tgt_caw_p = caw[2*src_nghs:2*src_nghs + tgt_nghs]
     bad_caw_n = caw[2*src_nghs + tgt_nghs:]
-    if len(self.num_neighbors) > 1:
+    if self.n_layers > 1:
       src_caw_p_l2 = caw_l2[0:num_ngh_l2]
       src_caw_n_l2 = caw_l2[num_ngh_l2:2*num_ngh_l2]
       tgt_caw_p_l2 = caw_l2[2*num_ngh_l2:3*num_ngh_l2]
@@ -303,7 +294,7 @@ class CAWN2(torch.nn.Module):
     # src_other_m = other_msk[0:src_nghs].nonzero().squeeze()
     # tgt_other_m = other_msk[src_nghs:src_nghs + tgt_nghs].nonzero().squeeze()
     # bad_other_m = other_msk[src_nghs + tgt_nghs:src_nghs + tgt_nghs + bad_nghs].nonzero().squeeze()
-    if len(self.num_neighbors) > 1:
+    if self.n_layers > 1:
       p_src_f = torch.cat((src_n_f, src_prev_f[:, :-1], src_caw_p, src_caw_p_l1l2, parent_node_feat[:src_nghs]), -1)
       n_src_f = torch.cat((src_n_f, src_prev_f[:, :-1], src_caw_n, src_caw_n_l1l2, parent_node_feat[:src_nghs]), -1)
       tgt_f = torch.cat((tgt_n_f, tgt_prev_f[:, :-1], tgt_caw_p, tgt_caw_p_l2l1, parent_node_feat[src_nghs:src_nghs+tgt_nghs]), -1)
@@ -317,10 +308,6 @@ class CAWN2(torch.nn.Module):
       n_src_f = torch.cat((src_n_f, src_prev_f[:, :-1], src_caw_n, parent_node_feat[:src_nghs]), -1)
       tgt_f = torch.cat((tgt_n_f, tgt_prev_f[:, :-1], tgt_caw_p, parent_node_feat[src_nghs:src_nghs+tgt_nghs]), -1)
       bad_f = torch.cat((bad_n_f, bad_prev_f[:, :-1], bad_caw_n, parent_node_feat[src_nghs+tgt_nghs:]), -1)
-      # p_src_f = torch.cat((src_n_f, src_prev_f[:, :-1], src_caw_p), -1)
-      # n_src_f = torch.cat((src_n_f, src_prev_f[:, :-1], src_caw_n), -1)
-      # tgt_f = torch.cat((tgt_n_f, tgt_prev_f[:, :-1], tgt_caw_p), -1)
-      # bad_f = torch.cat((bad_n_f, bad_prev_f[:, :-1], bad_caw_n), -1)
     feat_l1 = torch.cat((p_src_f, n_src_f, tgt_f, bad_f), 0)
     ngh_id = torch.cat((src_ngh_id, ngh_id), 0)
     self_msk = torch.cat((ori_idx[:src_nghs], ori_idx), 0) == ngh_id
@@ -332,38 +319,11 @@ class CAWN2(torch.nn.Module):
     ori_feat = feat_l1.index_select(0, self_msk)
     # feat_l1 = feat_l1.index_select(0, other_msk)
     # ngh_id = ngh_id.index_select(0, other_msk)
-    if len(self.num_neighbors) > 1:
+    if self.n_layers > 1:
       feat_l2 = torch.cat((p_src_f_l2, n_src_f_l2, tgt_f_l2, bad_f_l2), 0)
       all_feat = torch.cat((feat_l1, feat_l2), 0)
     else:
       all_feat = feat_l1
-    # end = time.time()
-    # self.log_time('agg features (prep)', start, end)
-    # start = time.time()
-    # p_src_ori_f = p_src_f.index_select(0, src_self_m)
-    # p_src_f = p_src_f.index_select(0, src_other_m)
-    # n_src_ori_f = n_src_f.index_select(0, src_self_m)
-    # n_src_f = n_src_f.index_select(0, src_other_m)
-    # tgt_ori_f = tgt_f.index_select(0, tgt_self_m)
-    # tgt_f = tgt_f.index_select(0, tgt_other_m)
-    # bad_ori_f = bad_f.index_select(0, bad_self_m)
-    # bad_f = bad_f.index_select(0, bad_other_m)
-    # end = time.time()
-    # self.log_time('agg features (index_select)', start, end)
-    # start = time.time()
-    # src_dense_idx, src_dense_msk = self.get_dense_idx(batch_size, src_sparse_idx, src_other_m)
-    # tgt_dense_idx, tgt_dense_msk = self.get_dense_idx(batch_size, tgt_sparse_idx, tgt_other_m)
-    # bad_dense_idx, bad_dense_msk = self.get_dense_idx(batch_size, bad_sparse_idx, bad_other_m)
-    # end = time.time()
-    # self.log_time('agg features (get_dense_idx)', start, end)
-    # start = time.time()
-    # p_src_f = self.get_dense_agg_feature(batch_size, src_dense_idx, p_src_f)
-    # n_src_f = self.get_dense_agg_feature(batch_size, src_dense_idx, n_src_f)
-    # tgt_f = self.get_dense_agg_feature(batch_size, tgt_dense_idx, tgt_f)
-    # bad_f = self.get_dense_agg_feature(batch_size, bad_dense_idx, bad_f)
-    # end = time.time()
-    # self.log_time('agg features (get_dense_agg_feature)', start, end)
-    # start = time.time()
     src_ori = ori_idx[:src_nghs]
     tgt_ori = ori_idx[src_nghs:src_nghs + tgt_nghs]
     bad_ori = ori_idx[src_nghs + tgt_nghs:]
@@ -371,7 +331,7 @@ class CAWN2(torch.nn.Module):
     # p_src_ori_f, n_src_ori_f, tgt_ori_f, bad_ori_f = [None]*4
     sparse_l1 = torch.cat((src_sparse_idx,sparse_idx + batch_size), 0)
     # sparse_l1 = sparse_l1.index_select(0, other_msk)
-    if len(self.num_neighbors) > 1:
+    if self.n_layers > 1:
       ori_idx = torch.cat((sparse_l1, torch.repeat_interleave(torch.arange(batch_size * 4, device=device), self.num_neighbors[1])), 0)
     else:
       ori_idx = sparse_l1
@@ -379,142 +339,89 @@ class CAWN2(torch.nn.Module):
     # ori_idx = torch.cat((src_sparse_idx,sparse_idx + batch_size), 0)
     # ori_idx = torch.repeat_interleave(torch.arange(batch_size * 4, device=device), self.num_neighbors[1])
     # ngh_id = torch.cat((src_ngh_id, src_ngh_id, tgt_ngh_id, bad_ngh_id, ngh_id_l2[:num_ngh_l2], ngh_id_l2), 0)
-    if len(self.num_neighbors) > 1:
+    if self.n_layers > 1:
       ngh_id = torch.cat((ngh_id, ngh_id_l2[:num_ngh_l2], ngh_id_l2), 0)
     else:
       ngh_id = torch.cat((src_ngh_id, src_ngh_id, tgt_ngh_id, bad_ngh_id), 0)
-    # ngh_id = torch.cat((ngh_id_l2[:num_ngh_l2], ngh_id_l2), 0)
 
-    p_score, n_score = self.forward(ori_idx, ngh_id, ori_feat, all_feat, src_dense_msk, src_dense_msk, tgt_dense_msk, bad_dense_msk, batch_size)
-    # pos_score = self.forward(p_src_ori_f, tgt_ori_f, p_src_f, tgt_f, src_dense_msk, tgt_dense_msk, batch_size)
-    # neg_score1 = self.forward(n_src_ori_f, bad_ori_f, n_src_f, bad_f, src_dense_msk, bad_dense_msk, batch_size)
+    p_score, n_score, attn_score = self.forward(ori_idx, ngh_id, ori_feat, all_feat, batch_size)
     end = time.time()
     self.log_time('attention', start, end)
     start = time.time()
-    # p_src_ori_f = p_src_ori_f.detach()
-    # tgt_ori_f = tgt_ori_f.detach()
-    # p_src_f = p_src_f.detach()
-    # tgt_f = tgt_f.detach()
+    self.update_memory(src_e_l, tgt_e_l, src_th, tgt_th, src_start_th, tgt_start_th, src_ngh_n_th, tgt_ngh_n_th, src_nghs, tgt_nghs, src_ngh_id, tgt_ngh_id, e_idx_th, cut_time_th, hidden_states, pr_hidden_states, updated_mem, batch_size, device)
+    return p_score.sigmoid(), n_score.sigmoid()
+  
+  def update_memory(self, src_e_l, tgt_e_l, src_th, tgt_th, src_start_th, tgt_start_th, src_ngh_n_th, tgt_ngh_n_th, src_nghs, tgt_nghs, src_ngh_id, tgt_ngh_id, e_idx_th, cut_time_th, hidden_states, pr_hidden_states, updated_mem, batch_size, device):
     src_e_th = torch.from_numpy(src_e_l).to(dtype=torch.long, device=device)
     tgt_e_th = torch.from_numpy(tgt_e_l).to(dtype=torch.long, device=device)
     e_pos_th = torch.cat((src_e_th, tgt_e_th), 0)
-    ori_idx = torch.cat((src_th, tgt_th), 0)
-    # print(e_pos_th)
-    # print(self.start_idx[ori_idx])
-    # print(e_pos_th - self.start_idx[ori_idx])
-    self.num_neighbors_stored[ori_idx] = torch.max(self.num_neighbors_stored[ori_idx], e_pos_th - self.start_idx[ori_idx] + 1).long()
-    # print(self.num_neighbors_stored[ori_idx])
     opp_th = torch.cat((tgt_th, src_th), 0)
-    # self.neighborhood_store[0][e_pos_th, 0] = opp_th.float()
-    # self.neighborhood_store[0][e_pos_th, -2:] = torch.cat((e_idx_th.float().repeat(2).unsqueeze(1), cut_time_th.repeat(2).unsqueeze(1)), -1)
+    e_start_th = torch.cat((src_start_th, tgt_start_th), 0)
+    e_pos_th += e_start_th
+    ori_idx = torch.cat((src_th, tgt_th), 0)
+
+    self.num_neighbors_stored[ori_idx] = torch.max(self.num_neighbors_stored[ori_idx], e_pos_th - e_start_th + 1).long()
     hidden_states = hidden_states[:, :self.hidden_dim]
     reset_size = hidden_states.shape[1]
     if self.backprop_n_history > 1:
       reset_size += 2
     reset_memory = torch.zeros((batch_size * 2, reset_size), device=device)
-    e_start_th = torch.cat((src_start_th, tgt_start_th), 0)
+    
     reset_memory_raw = torch.cat((opp_th.unsqueeze(1), e_idx_th.float().repeat(2).unsqueeze(1), cut_time_th.repeat(2).unsqueeze(1)), -1)
     self.neighborhood_store[0][e_start_th, :3] = torch.cat((ori_idx.unsqueeze(1), e_idx_th.float().repeat(2).unsqueeze(1), cut_time_th.repeat(2).unsqueeze(1)), -1)
     reset_memory = torch.cat((reset_memory_raw, reset_memory), -1)
     self.neighborhood_store[0][e_pos_th] = reset_memory
-    
-    
-    # end = time.time()
-    # self.log_time('update part memory', start, end)
-    # start = time.time()
-    # #TODO reverse unique
-    # src_src_f = p_src_ori_f[:, self.feat_dim + self.e_feat_dim:self.feat_dim + self.hidden_dim]
-    # tgt_tgt_f = tgt_ori_f[:, self.feat_dim + self.e_feat_dim:self.feat_dim + self.hidden_dim]
     ngh_n_th = torch.cat((src_ngh_n_th, tgt_ngh_n_th), 0)
 
-    agg_memory = torch.cat((ori_idx.unsqueeze(1), e_start_th.unsqueeze(1), opp_th.unsqueeze(1), e_pos_th.unsqueeze(1), cut_time_th.repeat(2).unsqueeze(1), e_idx_th.repeat(2).unsqueeze(1)), -1)
-    agg_memory = torch.repeat_interleave(agg_memory, ngh_n_th, dim=0)
-    # # e_pos_th = torch.repeat_interleave(e_pos_th, ngh_n_th, dim=0)
-    # # opp_idx = torch.repeat_interleave(opp_th, ngh_n_th, dim=0)
-    # # ts_th = torch.repeat_interleave(cut_time_th.repeat(2), ngh_n_th, dim=0)
-    # # e_idx_th = torch.repeat_interleave(e_idx_th.repeat(2), ngh_n_th, dim=0)
-    opp_th = agg_memory[:,2].long()
-    parent_th = agg_memory[:,0].long()
+    e_pos_th = torch.repeat_interleave(e_pos_th, ngh_n_th, dim=0)
+    parent_th = torch.repeat_interleave(ori_idx, ngh_n_th, dim=0)
+    ori_idx = torch.repeat_interleave(ori_idx, ngh_n_th, dim=0)
+    e_start_th = torch.repeat_interleave(e_start_th, ngh_n_th, dim=0)
+    ts_th = torch.repeat_interleave(cut_time_th.repeat(2), ngh_n_th, dim=0)
+    e_idx_th = torch.repeat_interleave(e_idx_th.repeat(2), ngh_n_th, dim=0)
+    opp_th = torch.repeat_interleave(opp_th, ngh_n_th, dim=0)
     ngh_id = torch.cat((src_ngh_id, tgt_ngh_id), 0).long()
-    if len(self.num_neighbors) > 1:
-      l2_id = opp_th * self.num_neighbors[1] + (hash(ngh_id * parent_th) ^ self.seed) % self.num_neighbors[1]
+    updated_mem = updated_mem.detach()
+    
+    # Update second hop neighbors
+    if self.n_layers > 1:
+      l2_id = opp_th * self.num_neighbors[1] + (hash(ngh_id) ^ self.seed) % self.num_neighbors[1]
+      occupied_l2 = torch.logical_and(self.neighborhood_store[1][l2_id,self.ngh_id_idx] != 0, self.neighborhood_store[1][l2_id,self.ngh_id_idx] != updated_mem[:src_nghs + tgt_nghs, 0])
+      set_new_l2 =  (occupied_l2 * torch.rand(occupied_l2.shape[0], device=device)) < 0.3
+      l2_id *= set_new_l2
+      l2_id *= ngh_id != parent_th
+      l2_id *= ngh_id != opp_th
+      l2_id *= ngh_id != 0
+      l2_id *= torch.rand(l2_id.shape[0], device=device) > 0.3
       if self.backprop_n_history == 1:
-        self.neighborhood_store[1][l2_id] = torch.cat((updated_mem[:src_nghs + tgt_nghs, :-1].detach(), parent_th.unsqueeze(1)), -1)
+        self.neighborhood_store[1][l2_id] = torch.cat((updated_mem[:src_nghs + tgt_nghs, :-1], parent_th.unsqueeze(1)), -1)
+        # updated_mem_l2 = updated_mem_l2.detach()
+        # existing_l2 = updated_mem_l2[:num_ngh_l2*2, self.ngh_id_idx]
+        # existing_l2_parent = updated_mem_l2[:num_ngh_l2*2, self.parent_idx]
+        # existing_l2_hidden = updated_mem_l2[:num_ngh_l2*2, 3:3+self.hidden_dim]
+        # existing_l2_idx = torch.cat((tgt_th, src_th), 0).repeat_interleave(self.num_neighbors[1]) * self.num_neighbors[1] + (hash(existing_l2) ^ self.seed) % self.num_neighbors[1]
+        # existing_l2_msk = (existing_l2 == self.neighborhood_store[1][existing_l2_idx,self.ngh_id_idx]).unsqueeze(1).repeat(1, self.hidden_dim)
+        # self.neighborhood_store[1][existing_l2_idx, 3:3+self.hidden_dim] *= torch.logical_not(existing_l2_msk)
+        # self.neighborhood_store[1][existing_l2_idx, 3:3+self.hidden_dim] += existing_l2_hidden * existing_l2_msk
       else:
-        updated_mem = updated_mem.detach()
-        self.neighborhood_store[1][l2_id] = torch.cat((updated_mem[:src_nghs + tgt_nghs, :3].detach(), pr_hidden_states[:src_nghs + tgt_nghs], parent_th.unsqueeze(1)), -1)
+        self.neighborhood_store[1][l2_id] = torch.cat((updated_mem[:src_nghs + tgt_nghs, :3], pr_hidden_states[:src_nghs + tgt_nghs], parent_th.unsqueeze(1)), -1)
     e_msk = (ngh_id == opp_th).nonzero().squeeze()
-    self_msk = (ngh_id == agg_memory[:,0]).nonzero().squeeze()
-    # agg_f = torch.cat((p_src_f, tgt_f), 0)
-    # agg_memory = torch.cat((agg_memory, agg_f), -1)
-    # pre_hidden = pre_hidden[:src_nghs + tgt_nghs].detach()
+    self_msk = (ngh_id == ori_idx).nonzero().squeeze()
     if self.backprop_n_history == 1:
-      agg_memory = torch.cat((agg_memory, hidden_states[:src_nghs + tgt_nghs].detach()), -1)
+      agg_p = hidden_states[:src_nghs + tgt_nghs].detach()
     else:
-      agg_memory = torch.cat((agg_memory, pr_hidden_states[:src_nghs + tgt_nghs]), -1)
+      agg_p = pr_hidden_states[:src_nghs + tgt_nghs]
+    # Update neighbors
+    self.store_memory(opp_th.index_select(0, e_msk), e_pos_th.index_select(0, e_msk), ts_th.index_select(0, e_msk), e_idx_th.index_select(0, e_msk), agg_p.index_select(0, e_msk))
+    # Update self
+    self.store_memory(ori_idx.index_select(0, self_msk), e_start_th.index_select(0, self_msk), ts_th.index_select(0, self_msk), e_idx_th.index_select(0, self_msk), agg_p.index_select(0, self_msk))
 
-    e_agg_memory = agg_memory.index_select(0, e_msk)
-    ngh_id = e_agg_memory[:,2]
-    e_pos_th = e_agg_memory[:,3]
-    ts_th = e_agg_memory[:,4]
-    e_th = e_agg_memory[:,5]
-    agg_p = e_agg_memory[:,6:]
-    self.store_memory(ngh_id,e_pos_th,ts_th,e_th,agg_p)
-    self_agg_memory = agg_memory.index_select(0, self_msk)
-    self_id = self_agg_memory[:,0]
-    self_e_pos_th = self_agg_memory[:,1]
-    self_ts_th = self_agg_memory[:,4]
-    self_e_th = self_agg_memory[:,5]
-    self_agg_p = self_agg_memory[:,6:]
-    self.store_memory(self_id,self_e_pos_th,self_ts_th,self_e_th,self_agg_p)
-    # agg_f = agg_f.index_select(0, e_msk)
-    # n_id = n_id.index_select(0, e_msk)
-    # e_idx_th = e_idx_th.index_select(0, e_msk)
-    # ts_th = ts_th.index_select(0, e_msk)
-    # e_pos_th = e_pos_th.index_select(0, e_msk)
-    # prev_data = torch.cat((n_id.unsqueeze(1), agg_f[:, self.feat_dim:self.feat_dim + self.hidden_dim], e_th.unsqueeze(1), ts_th.unsqueeze(1)), -1)
-    # self.neighborhood_store[0][n_pos_idx[0:src_nghs + tgt_nghs], self.n_id_idx:self.ts_emb_idx] = torch.cat((e_hidden_state.detach(), time_hidden_state.detach()), -1)[0:src_nghs + tgt_nghs]
-    # self.neighborhood_store[0][e_pos_th, self.n_id_idx:self.ts_emb_idx] = agg_f[:, self.feat_dim:self.feat_dim + self.hidden_dim]
-    # # if not test:
-    # end = time.time()
-    # self.log_time('prep update memory', start, end)
-    # start = time.time()
-    # self.neighborhood_store[0][e_pos_th.long()] = prev_data
-    # self.neighborhood_store[0][src_start_th, self.e_emb_idx:self.ts_emb_idx] = src_src_f
-    # self.neighborhood_store[tgt_start_th, self.e_emb_idx:self.ts_emb_idx] = tgt_tgt_f
-    # # print(self.neighborhood_store[0][src_start_th])
-    # # self.update_memory_store(src_dense_n_id, src_th, src_e_f, src_ts_f, src_e_th, tgt_th, e_idx_th, cut_time_th, src_start_th)
-    # # self.update_memory_store(tgt_dense_n_id, tgt_th, tgt_e_f, tgt_ts_f, tgt_e_th, src_th, e_idx_th, cut_time_th, tgt_start_th)
-    # end = time.time()
-    # self.log_time('update memory', start, end)
-    # end_t = time.time()
-    # self.log_time('total forward', start_t, end_t)
-    return p_score.sigmoid(), n_score.sigmoid()
-  
+
   def store_memory(self, n_id, e_pos_th, ts_th, e_th, agg_p):
     prev_data = torch.cat((n_id.unsqueeze(1), e_th.unsqueeze(1), ts_th.unsqueeze(1), agg_p), -1)
     self.neighborhood_store[0][e_pos_th.long()] = prev_data
 
-  def get_dense_idx(self, batch_size, sparse_idx, other_m):
-    sparse_idx = sparse_idx.index_select(0, other_m)    
-    dense_msk = torch.ones((batch_size * self.nngh), dtype=torch.bool, device=self.device)
-    if len(other_m.shape) == 0:
-      dense_msk = dense_msk.reshape(batch_size, self.nngh)
-      return None, dense_msk
-    dense_idx = torch.randint(self.nngh, (len(other_m),), device=self.device) + sparse_idx * self.nngh
-    dense_msk[dense_idx] = False
-    dense_msk = dense_msk.reshape(batch_size, self.nngh)
-    return dense_idx, dense_msk
-
-  def get_dense_agg_feature(self, batch_size, dense_idx, n_f):
-    agg_dense = torch.zeros(batch_size * self.nngh, self.attn_dim, device=self.device)
-    if dense_idx is not None:
-      agg_dense = agg_dense.index_copy_(0, dense_idx, n_f) # mindful of nondeterministic behavior
-    agg_dense = agg_dense.reshape(batch_size, self.nngh, -1)
-    return agg_dense
-
   def get_relative_id(self, src_sparse_idx, tgt_sparse_idx, src_n_id, tgt_n_id, src_ts_hidden, tgt_ts_hidden):
-    
     sparse_idx = torch.cat((src_sparse_idx, tgt_sparse_idx), 0)
     n_id = torch.cat((src_n_id, tgt_n_id), 0)
     ts_hidden = torch.cat((src_ts_hidden, tgt_ts_hidden), 0)
@@ -527,23 +434,7 @@ class CAWN2(torch.nn.Module):
     assert(relative_ts.shape[0] == sparse_idx.shape[0] == ts_hidden.shape[0])
     return relative_ts
 
-
-  def store_prev_states(self, prev_states, device):
-    if prev_states is not None:
-      prev_src, prev_tgt, prev_e_hidden, prev_time_hidden = prev_states
-      self.ngh_encoder.update_hidden_state(prev_src, prev_tgt, prev_e_hidden.detach(), prev_time_hidden.detach(), device)
-
-  def update_prev_raw_data(self, src_idx_l, src_idx_th, tgt_idx_th, cut_time_th, e_idx_th, device):
-    start = time.time()
-    for i in range(len(src_idx_th)):
-      self.prev_raw_data[src_idx_l[i]] = (src_idx_th[i], tgt_idx_th[i], cut_time_th[i], e_idx_th[i])
-    end = time.time()
-    # self.logger.info('encode ngh for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
-
   def get_updated_memory_l2(self, ori_idx, cut_time_th, device):
-    start = time.time()
-    end = time.time()
-    self.log_time('get_updated_memory 1', start, end)
     start = time.time()
     ngh = self.neighborhood_store[1].view(self.total_nodes, self.num_neighbors[1], self.memory_dim)[ori_idx].view(ori_idx.shape[0] * self.num_neighbors[1], self.memory_dim)
     end = time.time()
@@ -674,115 +565,31 @@ class CAWN2(torch.nn.Module):
     updated_mem *= msk.unsqueeze(1).repeat(1, self.memory_dim)
     end = time.time()
     self.log_time('get_updated_memory 4', start, end)
-    # if prepre:
-    #   prev_data = torch.cat((pr_e_hidden_state, pr_time_hidden_state, ngh_e_raw.unsqueeze(1), ngh_ts_raw.unsqueeze(1)), -1)
-    # else:
-    #   prev_data = torch.cat((e_hidden_state, time_hidden_state, ngh_e_raw.unsqueeze(1), ngh_ts_raw.unsqueeze(1)), -1)
     if self.backprop_n_history > 1:
       pr_hidden_states = torch.cat((ngh_e_raw.unsqueeze(1), ngh_ts_raw.unsqueeze(1), pr_e_hidden_state, pr_time_hidden_state), -1).detach()
     else:
       pr_hidden_states = None
     return updated_mem, n_idx, pr_hidden_states
 
-  def update_neighborhood_state(self, src_idx_th, cut_time_th, device, is_edge=False):
-    start = time.time()
-    data = [self.prev_raw_data[i] if i in self.prev_raw_data else None for i in src_idx_th.tolist()]
-    data = list(filter(lambda d: d is not None, data))
-    if len(data) == 0:
-      return None
-    src, tgt, ts, e = list(zip(*data))
-    
-    # time_diff = cut_time_th - ts
-
-    e_feat = self.edge_raw_embed(torch.stack(e))
-    ts_feat = self.time_encoder(torch.stack(ts))
-    src_idx_l = np.array(src)
-    tgt_idx_l = np.array(tgt)
-    e_hidden_state, time_hidden_state = self.ngh_encoder.retrieve_hidden_state(src_idx_l, tgt_idx_l, device)
-    
-    e_hidden_state = self.feature_encoder(e_feat, e_hidden_state, use_dropout=False) # TODO: pass node embedding
-    time_hidden_state = self.time_aggregator(ts_feat, time_hidden_state, use_dropout=False)
-
-    
-    # hidden_state, cell_state = self.feature_encoder(hidden_embeddings, time_features, edge_features, hidden_state)
-    # hidden_state = hidden_state.unsqueeze(-2)
-    # cell_state = cell_state.unsqueeze(-2)
-    # hidden_state = torch.cat((hidden_state, cell_state), -2)
-    if self.history_agg_method == 'gru':
-      self.ngh_encoder.update_hidden_state(src_idx_l, tgt_idx_l, e_hidden_state, time_hidden_state, device)
-    else:
-      self.ngh_encoder.update_hidden_state(src_idx_l, tgt_idx_l, (e_hidden_state[0].detach(), e_hidden_state[1].detach()), (time_hidden_state[0].detach(), time_hidden_state[1].detach()), device)
-    end = time.time()
-    # self.logger.info('encode prev for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
-    return (src_idx_l, tgt_idx_l, e_hidden_state, time_hidden_state)
-
-  def forward(self, ori_idx, ngh_id, ori_feat, feat, p_src_msk, n_src_msk, tgt_msk, bad_msk, bs):
-    # ori_f = torch.cat((p_src_ori_f, n_src_ori_f, tgt_ori_f, bad_ori_f), 0).unsqueeze(1)
-    # msk = torch.cat((p_src_msk, n_src_msk, tgt_msk, bad_msk), 0)
-    # embed, _ = self.attn_m(ori_f, ngh_f, msk)
-    # embed = embed[0].squeeze(1)
-
+  
+  def forward(self, ori_idx, ngh_id, ori_feat, feat, bs):
     edge_idx = torch.stack((ngh_id, ori_idx))
     gat_data = torch.cat((edge_idx.T, feat, ori_feat), -1)
-    # perm = torch.randperm(ori_idx.size(0))
-    # gat_data = gat_data[perm[:self.nngh]]
     gat_data = gat_data[ngh_id.nonzero().squeeze()]
     edge_idx = gat_data[:, 0:2].T
     ngh_feat = gat_data[:, 2:2 + self.attn_dim]
     ori_feat = gat_data[:, 2 + self.attn_dim:]
-    embed, _ = self.gat((ngh_feat, ori_feat, edge_idx.long(), 4*bs))
+    embed, _, attn_score = self.gat((ngh_feat, ori_feat, edge_idx.long(), 4*bs))
     p_src_embed = embed[:bs]
     n_src_embed = embed[bs:2*bs]
     tgt_embed = embed[2*bs:3*bs]
     bad_embed = embed[3*bs:]
 
-    # src_embed, _ = self.attn_m(src_ori_f.unsqueeze(1), src_f, src_msk)
-    # tgt_embed, _ = self.attn_m(tgt_ori_f.unsqueeze(1), tgt_f, tgt_msk)
-    # src_embed = src_embed[0].squeeze(1)
-    # tgt_embed = tgt_embed[0].squeeze(1)
-
     p_score, p_score_walk = self.affinity_score(p_src_embed, tgt_embed)
     p_score.squeeze_(dim=-1)
     n_score, n_score_walk = self.affinity_score(n_src_embed, bad_embed)
     n_score.squeeze_(dim=-1)
-    # end = time.time()
-    # self.logger.info('self attention for the minibatch, time eclipsed: {} seconds'.format(str(end-start)))
-    return p_score, n_score
-
-  def get_pos_encoding_for_origin(self, src_idx, src_relative_id, tgt_relative_id):
-    src_src_relative_id = torch.index_select(src_relative_id, 1, src_idx)
-    src_src_relative_id = src_src_relative_id.to_dense()
-    src_src_relative_id = torch.diagonal(src_src_relative_id).T
-    src_tgt_relative_id = torch.index_select(tgt_relative_id, 1, src_idx)
-    src_tgt_relative_id = src_tgt_relative_id.to_dense()
-    src_tgt_relative_id = torch.diagonal(src_tgt_relative_id).T
-    assert(src_src_relative_id.shape == src_tgt_relative_id.shape)
-    src_relative_id_combined = torch.cat((src_src_relative_id, src_tgt_relative_id), -1) # [B,1,2]
-    assert(src_relative_id_combined.shape[-1] == 2)
-    src_pos_encode = self.trainable_embedding(src_relative_id_combined.long())
-    return src_pos_encode.sum(dim=-2)
-
-  def get_pos_encoding(self, src_ngh_idx, src_relative_id, tgt_relative_id):
-    src_src_relative_id = torch.index_select(src_relative_id, 1, src_ngh_idx)
-    src_src_relative_id = src_src_relative_id.to_dense()
-    src_tgt_relative_id = torch.index_select(tgt_relative_id, 1, src_ngh_idx)
-    src_tgt_relative_id = src_tgt_relative_id.to_dense()
-    assert(src_src_relative_id.shape == src_tgt_relative_id.shape)
-    src_relative_id_combined = torch.cat((src_src_relative_id, src_tgt_relative_id), -1) # [B,N,2]
-    assert(src_relative_id_combined.shape[-1] == 2)
-    src_pos_encode = self.trainable_embedding(src_relative_id_combined.long())
-    mask = src_src_relative_id != 1
-    return src_pos_encode.sum(dim=-2), mask
-
-  def get_positions(self, src_idx_l, src_ngh_features, device):
-    unqiue_src_l = np.unique(src_idx_l)
-    src_pos = torch.sparse_coo_tensor([unqiue_src_l, unqiue_src_l], 2 * torch.ones(len(unqiue_src_l), 1).long(), (self.num_nodes, self.num_nodes, 1)).to(device).coalesce()
-    indices = np.array([np.take(src_idx_l,src_ngh_features.indices().cpu()[0]), np.array(src_ngh_features.indices().cpu()[1])])
-    indices = np.unique(indices, axis=1)
-    src_pos += torch.sparse_coo_tensor(indices, torch.ones(len(indices[0]), 1).long().to(device), (self.num_nodes, self.num_nodes, 1))
-    src_pos = src_pos.coalesce()
-    src_ngh_zeros = torch.sparse_coo_tensor(src_pos.indices(), torch.zeros(len(src_pos.indices()[0]), 1).long().to(device), (self.num_nodes, self.num_nodes, 1))
-    return src_pos, src_ngh_zeros.coalesce()
+    return p_score, n_score, attn_score
 
   def init_time_encoder(self):
     return TimeEncode(expand_dim=self.time_dim)

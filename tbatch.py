@@ -13,7 +13,7 @@ from library_models import *
 # INITIALIZE PARAMETERS
 parser = argparse.ArgumentParser()
 parser.add_argument('--network', required=True, help='Name of the network/dataset')
-parser.add_argument('--train_proportion', default=0.8, type=float, help='Proportion of data (from beginning) in training')
+parser.add_argument('--train_proportion', default=0.7, type=float, help='Proportion of data (from beginning) in training')
 args = parser.parse_args()
 args.datapath = "processed/ml2_%s.csv" % args.network 
 
@@ -31,12 +31,12 @@ print("*** Network statistics:\n  %d users\n  %d items\n  %d interactions\n  %d/
 # OUTPUT FILE FOR THE BATCHES
 output_fname = "processed/batches_%s.txt" % args.network
 fout = open(output_fname, "w")
-fout.write("tbatch_id,u,i,ts,label,idx,src,tgt,e_from_u,e_from_i,u_start,i_start,u_ngh_n,i_ngh_n,i_post_n\n")
+fout.write("tbatch_id,u,i,ts,label,idx,src,tgt,e_from_u,e_from_i,u_start,i_start,u_ngh_n,i_ngh_n\n")
 
 # SET TRAINING, VALIDATION, TESTING, and TBATCH BOUNDARIES
 train_end_idx = validation_start_idx = int(num_interactions * args.train_proportion) 
-test_start_idx = int(num_interactions * (args.train_proportion+0.1))
-test_end_idx = int(num_interactions * (args.train_proportion+0.2))
+test_start_idx = int(num_interactions * (args.train_proportion+0.15))
+test_end_idx = int(num_interactions * (args.train_proportion+0.3))
 
 # SET BATCHING TIMESPAN
 '''
@@ -96,7 +96,7 @@ for j in range(num_interactions):
     # AFTER PROCESSING ALL INTERACTIONS IN A TIMESPAN
     if timestamp - tbatch_start_time > tbatch_timespan or j == num_interactions - 1:
         # AFTER ALL INTERACTIONS IN THE TIME WINDOW ARE CONVERTED TO T-BATCHES, SAVE THEM TO FILE.
-        print('Read till interaction %d. This timespan had %d interactions and created %d T-batches.' % (j, tbatch_interaction_count, len(lib.current_tbatches_user)))
+        # print('Read till interaction %d. This timespan had %d interactions and created %d T-batches.' % (j, tbatch_interaction_count, len(lib.current_tbatches_user)))
         total_tbatches_count += len(lib.current_tbatches_user)
         total_interactions_count += tbatch_interaction_count 
 

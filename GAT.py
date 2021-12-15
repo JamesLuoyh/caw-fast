@@ -2,6 +2,18 @@ import torch
 import torch.nn as nn
 import enum
 
+"""
+@misc{Gordic2020PyTorchGAT,
+  author = {Gordic, Aleksa},
+  title = {pytorch-GAT},
+  year = {2020},
+  publisher = {GitHub},
+  journal = {GitHub repository},
+  howpublished = {url{https://github.com/gordicaleksa/pytorch-GAT}},
+}
+
+"""
+
 class LayerType(enum.Enum):
     IMP1 = 0,
     IMP2 = 1,
@@ -255,7 +267,7 @@ class GATLayerImp3(GATLayer):
         # Step 4: Residual/skip connections, concat and bias
         #
         out_nodes_features = self.skip_concat_bias(attentions_per_edge, in_nodes_features, out_nodes_features)
-        return (out_nodes_features, edge_index)
+        return (out_nodes_features, edge_index, attentions_per_edge)
 
     #
     # Helper functions (without comments there is very little code so don't be scared!)

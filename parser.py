@@ -7,7 +7,7 @@ def get_args():
 
   # select dataset and training mode
   parser.add_argument('-d', '--data', type=str, help='data sources to use, try wikipedia or reddit',
-            choices=['wikipedia', 'reddit', 'socialevolve', 'uci', 'enron', 'socialevolve_1month', 'socialevolve_2weeks'],
+            choices=['wikipedia', 'reddit', 'socialevolve', 'uci', 'enron', 'socialevolve_1month', 'socialevolve_2weeks', 'sx-superuser'],
             default='wikipedia')
   parser.add_argument('-m', '--mode', type=str, default='t', choices=['t', 'i'], help='transductive (t) or inductive (i)')
 
@@ -42,6 +42,7 @@ def get_args():
   parser.add_argument('--bs', type=int, default=64, help='batch_size')
   parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
   parser.add_argument('--drop_out', type=float, default=0.1, help='dropout probability for all dropout layers')
+  parser.add_argument('--drop_out_neighbors', type=float, default=0.1, help='dropout probability for storing new links to memory in a batch')
   parser.add_argument('--tolerance', type=float, default=1e-3,
             help='toleratd margainal improvement for early stopper')
 
