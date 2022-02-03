@@ -329,6 +329,7 @@ class GATLayerImp3(GATLayer):
         # aggregation step - we accumulate projected, weighted node features for all the attention heads
         # shape = (E, NH, FOUT) -> (N, NH, FOUT)
         out_nodes_features.scatter_add_(self.nodes_dim, trg_index_broadcasted, nodes_features_proj_lifted_weighted)
+        # scatter_mean(all_hidden, inverse_idx.unsqueeze(1).repeat(1,self.caw_dim), out=relative_ts, dim=0)
 
         return out_nodes_features
 

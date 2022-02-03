@@ -115,7 +115,7 @@ def run(args):
     out.to_csv(OUT_DF)
 
 parser = argparse.ArgumentParser('Interface for second round of propressing csv source data for CATAW framework')
-parser.add_argument('--dataset', choices = ['wikipedia', 'reddit', 'socialevolve', 'uci', 'enron', 'socialevolve_1month', 'socialevolve_2weeks', 'sx-superuser'], 
+parser.add_argument('--dataset', choices = ['wikipedia', 'reddit', 'socialevolve', 'uci', 'enron', 'socialevolve_1month', 'socialevolve_2weeks', 'sx-superuser', 'sx-askubuntu', 'wiki-talk-temporal','wiki-talk-temporal-all', 'mooc'], 
                    help='specify one dataset to preprocess')
 parser.add_argument('--max_neighbors', type=int, default=32, help='number of neighbors to store per node')
 parser.add_argument('--seed', type=int, default=1, help='seed for randomization of neighborhood store index')

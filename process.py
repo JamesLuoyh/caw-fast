@@ -69,7 +69,7 @@ def run(args):
     OUT_FEAT = './processed/ml_{}.npy'.format(data_name)
     OUT_NODE_FEAT = './processed/ml_{}_node.npy'.format(data_name)
     
-    jodie_data = data_name in ['wikipedia', 'reddit']
+    jodie_data = data_name in ['wikipedia', 'reddit', 'mooc']
     print('preprocess {} dataset ...')
     df, feat = preprocess(PATH)
     new_df = reindex(df, jodie_data)
@@ -100,7 +100,7 @@ def run(args):
 
 
 parser = argparse.ArgumentParser('Interface for propressing csv source data for TGAT framework')
-parser.add_argument('--dataset', choices = ['wikipedia', 'reddit', 'socialevolve', 'socialevolve_1month', 'socialevolve_2weeks'], 
+parser.add_argument('--dataset', choices = ['wikipedia', 'reddit', 'socialevolve', 'socialevolve_1month', 'socialevolve_2weeks', 'wiki-talk-temporal','wiki-talk-temporal-all', 'sx-superuser', 'mooc', 'sx-askubuntu'], 
                    help='specify one dataset to preprocess')
 parser.add_argument('--node_edge_feat_dim', default=172, help='number of dimensions for 0-padded node and edge features')
 parser.add_argument('--one-hot-node', type=bool, default=False,

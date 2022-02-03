@@ -7,7 +7,7 @@ def get_args():
 
   # select dataset and training mode
   parser.add_argument('-d', '--data', type=str, help='data sources to use, try wikipedia or reddit',
-            choices=['wikipedia', 'reddit', 'socialevolve', 'uci', 'enron', 'socialevolve_1month', 'socialevolve_2weeks', 'sx-superuser'],
+            choices=['wikipedia', 'reddit', 'socialevolve', 'uci', 'enron', 'socialevolve_1month', 'socialevolve_2weeks', 'sx-askubuntu', 'sx-superuser', 'wiki-talk-temporal','wiki-talk-temporal-all', 'mooc'],
             default='wikipedia')
   parser.add_argument('-m', '--mode', type=str, default='t', choices=['t', 'i'], help='transductive (t) or inductive (i)')
 
@@ -35,7 +35,7 @@ def get_args():
             help='use dot product attention or mapping based, we only use the default here')
   parser.add_argument('--attn_n_head', type=int, default=2, help='number of heads used in tree-shaped attention layer, we only use the default here')
   parser.add_argument('--time', type=str, default='time', choices=['time', 'pos', 'empty'], help='how to use time information, we only use the default here')
-
+  parser.add_argument('--time_dim', type=int, default=1, help='dimension of the time embedding')
   # general training hyper-parameters
   parser.add_argument('--n_epoch', type=int, default=50, help='number of epochs')
   parser.add_argument('--backprop_n_history', type=int, default=1, help='number of items in history for the memory state to backprop for each iteration')

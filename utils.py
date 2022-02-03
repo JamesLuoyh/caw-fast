@@ -2,10 +2,11 @@ import numpy as np
 import torch
 import os
 import random
-
+import statistics
+import math
 
 class EarlyStopMonitor(object):
-  def __init__(self, max_round=3, higher_better=True, tolerance=1e-3):
+  def __init__(self, max_round=5, higher_better=True, tolerance=1e-3):
     self.max_round = max_round
     self.num_round = 0
 
@@ -81,3 +82,10 @@ def process_sampling_numbers(num_neighbors, num_layers):
   else:
     num_layers = len(num_neighbors)
   return num_neighbors, num_layers
+
+def mat_results(logger, arr, name):
+  logger.info(name + " " + str(arr))
+  logger.info("Mean " + str(100 * statistics.mean(arr)))
+  logger.info("Standard deviation " + str(statistics.pstdev(arr)))
+  logger.info("95% " + str(1.96 * 100 * statistics.pstdev(arr) / math.sqrt(len(arr))))
+  logger.info("--------")

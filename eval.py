@@ -19,6 +19,9 @@ def eval_one_epoch(hint, tgan, sampler, src, tgt, ts, label, e_id, src_e, tgt_e,
     else:
       b_max = math.ceil(num_test_instance / TEST_BATCH_SIZE)
       b_min = 0
+    print("number of test batch: " + str(b_max))
+    print("num_test_instance: " + str(num_test_instance))
+    print("TEST_BATCH_SIZE: " + str(TEST_BATCH_SIZE))
     for k in range(b_min, b_max):
       # percent = 100 * k / num_test_batch
       # if k % int(0.2 * num_test_batch) == 0:

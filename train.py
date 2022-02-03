@@ -8,6 +8,8 @@ from sklearn.metrics import roc_auc_score
 from eval import *
 import logging
 import random
+import time
+from utils import mat_results
 logging.getLogger('matplotlib.font_manager').disabled = True
 logging.getLogger('matplotlib.ticker').disabled = True
 
@@ -36,9 +38,11 @@ def train_val(train_val_data, model, mode, bs, epochs, criterion, optimizer, ear
   logger.info('num of batches per epoch: {}'.format(num_batch))
   idx_list = np.arange(num_instance)
   seeds = []
-  seed = random.randint(0,100)
+  # seed = random.randint(0,100)
+  train_time = []
   for epoch in range(epochs):
-    # seed = random .randint(0,100)
+    train_start = time.time()
+    seed = random .randint(0,100)
     model.set_seed(seed)
     seeds.append(seed)
     acc, ap, f1, auc, m_loss = [], [], [], [], []
@@ -80,7 +84,6 @@ def train_val(train_val_data, model, mode, bs, epochs, criterion, optimizer, ear
       loss = criterion(pos_prob, pos_label) + criterion(neg_prob, neg_label)
       loss.backward()
       optimizer.step()
-
       # collect training results
       with torch.no_grad():
         model.eval()
@@ -92,15 +95,20 @@ def train_val(train_val_data, model, mode, bs, epochs, criterion, optimizer, ear
         # f1.append(f1_score(true_label, pred_label))
         m_loss.append(loss.item())
         auc.append(roc_auc_score(true_label, pred_score))
-    
+    train_end = time.time()
+    train_time.append(train_end - train_start)
+    mat_results(logger, train_time, "train_time")
     # validation phase use all information
+    val_start = time.time()
     val_acc, val_ap, val_f1, val_auc = eval_one_epoch('val for {} nodes'.format(mode), model, val_rand_sampler, val_src_l,
                               val_tgt_l, val_ts_l, val_label_l, val_e_idx_l, val_src_e_l, val_tgt_e_l, val_src_start_l, val_tgt_start_l, val_src_ngh_n_l, val_tgt_ngh_n_l, tb=val_tb_l)
+    val_end = time.time()
     logger.info('epoch: {}:'.format(epoch))
     logger.info('epoch mean loss: {}'.format(np.mean(m_loss)))
     logger.info('train acc: {}, val acc: {}'.format(np.mean(acc), val_acc))
     logger.info('train auc: {}, val auc: {}'.format(np.mean(auc), val_auc))
     logger.info('train ap: {}, val ap: {}'.format(np.mean(ap), val_ap))
+    logger.info('train time: {}, val time: {}'.format(train_end - train_start, val_end - val_start))
     if epoch == 0:
       # save things for data anaysis
       checkpoint_dir = '/'.join(model.get_checkpoint_path(0).split('/')[:-1])
