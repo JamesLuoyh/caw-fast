@@ -1,0 +1,15 @@
+2022-07-05 10:05:43,766 - root - INFO - Namespace(aggregator='last', backprop_every=1, bs=200, data='wiki-talk-temporal-all', different_new_nodes=False, drop_out=0.1, dyrep=False, embedding_module='graph_attention', gpu=0, lr=0.0001, memory_dim=1, memory_update_at_end=False, memory_updater='gru', message_dim=100, message_function='identity', n_degree=10, n_epoch=1, n_head=2, n_layer=1, n_runs=2, node_dim=100, patience=5, prefix='tgn-attn-wiki', randomize_features=False, time_dim=100, uniform=False, use_destination_embedding_in_message=False, use_memory=True, use_source_embedding_in_message=False)
+2022-07-05 10:06:53,322 - root - INFO - num of training instances: 3560335
+2022-07-05 10:06:53,322 - root - INFO - num of batches per epoch: 17802
+2022-07-05 10:06:53,334 - root - INFO - start 0 epoch
+2022-07-06 08:16:34,023 - root - INFO - epoch: 0 took 79780.70s
+2022-07-06 08:16:34,027 - root - INFO - Epoch mean loss: 1.0722729016918637
+2022-07-06 08:16:34,027 - root - INFO - val auc: 0.7366317010074749, new node val auc: 0.7371647531287051
+2022-07-06 08:16:34,027 - root - INFO - val ap: 0.6591019678650891, new node val ap: 0.6647291907848367
+2022-07-06 18:02:47,351 - root - INFO - Test statistics: Old nodes -- auc: 0.7606712996045337, ap: 0.6600996297681738, time: 20261.259224891663
+2022-07-06 18:02:47,351 - root - INFO - Test statistics: New nodes -- auc: 0.5924269917385058, ap: 0.5672856346803763
+2022-07-06 18:02:47,353 - root - INFO - Saving TGN model
+2022-07-06 18:03:16,159 - root - INFO - TGN model saved
+2022-07-06 18:03:18,841 - root - INFO - num of training instances: 3560335
+2022-07-06 18:03:18,842 - root - INFO - num of batches per epoch: 17802
+2022-07-06 18:03:18,858 - root - INFO - start 0 epoch

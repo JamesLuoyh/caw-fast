@@ -1,0 +1,15 @@
+2022-06-18 04:17:02,200 - root - INFO - Namespace(aggregator='last', backprop_every=1, bs=100, data='wiki-talk-temporal-all', different_new_nodes=False, drop_out=0.1, dyrep=True, embedding_module='graph_attention', gpu=0, lr=0.0001, memory_dim=1, memory_update_at_end=False, memory_updater='rnn', message_dim=100, message_function='identity', n_degree=10, n_epoch=1, n_head=2, n_layer=1, n_runs=2, node_dim=100, patience=5, prefix='dyrep_rnn', randomize_features=False, time_dim=100, uniform=False, use_destination_embedding_in_message=True, use_memory=True, use_source_embedding_in_message=False)
+2022-06-18 04:18:11,288 - root - INFO - num of training instances: 3560335
+2022-06-18 04:18:11,288 - root - INFO - num of batches per epoch: 35604
+2022-06-18 04:18:11,302 - root - INFO - start 0 epoch
+2022-06-21 10:15:50,349 - root - INFO - epoch: 0 took 280659.06s
+2022-06-21 10:15:50,357 - root - INFO - Epoch mean loss: 1.2397310898191753
+2022-06-21 10:15:50,357 - root - INFO - val auc: 0.5994484332227163, new node val auc: 0.6200726142319654
+2022-06-21 10:15:50,357 - root - INFO - val ap: 0.5383928251449592, new node val ap: 0.5616078481248364
+2022-06-24 03:15:12,351 - root - INFO - Test statistics: Old nodes -- auc: 0.6988585158143668, ap: 0.6206731554037238, time: 135491.6140215397
+2022-06-24 03:15:12,351 - root - INFO - Test statistics: New nodes -- auc: 0.5037163495621851, ap: 0.5187455606377638
+2022-06-24 03:15:12,352 - root - INFO - Saving TGN model
+2022-06-24 03:15:39,543 - root - INFO - TGN model saved
+2022-06-24 03:15:41,792 - root - INFO - num of training instances: 3560335
+2022-06-24 03:15:41,792 - root - INFO - num of batches per epoch: 35604
+2022-06-24 03:15:41,809 - root - INFO - start 0 epoch
